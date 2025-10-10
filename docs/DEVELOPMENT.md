@@ -24,6 +24,7 @@ We provide two main aliases for ensuring code quality:
 #### `mix precommit`
 
 Run this before committing your code. It will:
+
 1. **Format code** - Automatically fixes formatting issues
 2. **Run Credo** - Checks code quality with strict mode
 3. **Run tests** - Ensures all tests pass
@@ -32,11 +33,13 @@ Run this before committing your code. It will:
 mix precommit
 ```
 
-This alias applies formatting changes, so your code will be modified if there are formatting issues.
+This alias applies formatting changes, so your code will be modified if there
+are formatting issues.
 
 #### `mix ci`
 
 This is designed for Continuous Integration environments. It will:
+
 1. **Check formatting** - Fails if code is not formatted (doesn't modify files)
 2. **Run Credo** - Checks code quality with strict mode
 3. **Run tests** - Ensures all tests pass
@@ -45,7 +48,8 @@ This is designed for Continuous Integration environments. It will:
 mix ci
 ```
 
-This alias does NOT modify your code - it only checks and will fail if formatting is incorrect.
+This alias does NOT modify your code - it only checks and will fail if
+formatting is incorrect.
 
 ### Credo Configuration
 
@@ -73,7 +77,8 @@ mix credo explain lib/req_cassette/plug.ex:177:7
 
 ### Formatter
 
-The project uses Elixir's built-in formatter. Configuration is in `.formatter.exs`.
+The project uses Elixir's built-in formatter. Configuration is in
+`.formatter.exs`.
 
 Run formatter:
 
@@ -111,13 +116,13 @@ mix test test/req_cassette/plug_test.exs:14
 mix test --trace
 ```
 
-### Run Skipped Tests
+### Run LLM Tests
 
 Some tests require API keys and are skipped by default:
 
 ```bash
 # Run all tests including skipped ones
-ANTHROPIC_API_KEY=sk-... mix test --include skip
+ANTHROPIC_API_KEY=sk-... mix test --include llm
 ```
 
 ## Demo Scripts
@@ -159,6 +164,7 @@ Your CI pipeline should run `mix ci`:
 ```
 
 The difference between `precommit` and `ci`:
+
 - **precommit**: Fixes formatting automatically (for local development)
 - **ci**: Only checks formatting, fails if not formatted (for CI/CD)
 
@@ -181,12 +187,14 @@ This is currently set to `:low` priority and won't fail the build.
 ## Dependencies
 
 Core dependencies:
+
 - `req` - HTTP client
 - `plug` - Web library (for connection handling)
 - `jason` - JSON encoding/decoding
 - `req_llm` - LLM integration
 
 Dev/Test dependencies:
+
 - `bypass` - Mock HTTP server for testing
 - `credo` - Code quality checker
 
@@ -194,7 +202,6 @@ Dev/Test dependencies:
 
 - `README.md` - Project overview and quick start
 - `SUMMARY.md` - Complete project documentation
-- `FIXES.md` - Bug fixes and technical details
 - `REQ_LLM_INTEGRATION.md` - ReqLLM usage guide
 - `DEVELOPMENT.md` - This file
 
@@ -210,7 +217,8 @@ Dev/Test dependencies:
 
 ### Tests failing in wrong environment
 
-If you see "mix test is running in the dev environment", make sure you're using the aliases:
+If you see "mix test is running in the dev environment", make sure you're using
+the aliases:
 
 ```bash
 # ❌ Wrong
@@ -222,7 +230,8 @@ mix precommit
 mix ci
 ```
 
-The aliases are configured with `preferred_cli_env` to run in the test environment.
+The aliases are configured with `preferred_cli_env` to run in the test
+environment.
 
 ### Credo too strict
 

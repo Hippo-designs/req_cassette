@@ -2,14 +2,20 @@
 
 ## What is ReqCassette?
 
-ReqCassette is a VCR-style record-and-replay library for Elixir's Req HTTP client. It allows you to record HTTP responses to files ("cassettes") and replay them in subsequent test runs, making your tests faster, deterministic, and free from network dependencies.
+ReqCassette is a VCR-style record-and-replay library for Elixir's Req HTTP
+client. It allows you to record HTTP responses to files ("cassettes") and replay
+them in subsequent test runs, making your tests faster, deterministic, and free
+from network dependencies.
 
 ## Key Features
 
-- ✅ **Built on Req's native testing infrastructure** - Uses `Req.Test` and Plug, not global mocking
+- ✅ **Built on Req's native testing infrastructure** - Uses `Req.Test` and
+  Plug, not global mocking
 - ✅ **Async-safe** - Works with `async: true` in ExUnit
-- ✅ **Simple API** - Just add `plug: {ReqCassette.Plug, opts}` to your Req calls
-- ✅ **ReqLLM Integration** - Perfect for testing LLM applications (save $$$ on API calls!)
+- ✅ **Simple API** - Just add `plug: {ReqCassette.Plug, opts}` to your Req
+  calls
+- ✅ **ReqLLM Integration** - Perfect for testing LLM applications (save $$$ on
+  API calls!)
 - ✅ **JSON cassettes** - Human-readable, easy to inspect and edit
 - ✅ **Automatic body decoding** - Properly handles JSON responses
 
@@ -30,9 +36,9 @@ req_cassette/
 │   └── simple_demo.exs          # Basic demo (requires Bypass)
 ├── livebooks/
 │   └── req_llm.livemd           # Interactive demo
-├── FIXES.md                      # Documentation of bugs fixed
-├── REQ_LLM_INTEGRATION.md       # ReqLLM usage guide
-└── SUMMARY.md                    # This file
+└── docs/
+    ├── REQ_LLM_INTEGRATION.md   # ReqLLM usage guide
+    └── SUMMARY.md               # This file
 ```
 
 ## Quick Start
@@ -72,7 +78,9 @@ response = Req.get!(
   "anthropic:claude-sonnet-4-20250514",
   "Explain recursion",
   max_tokens: 100,
-  plug: {ReqCassette.Plug, %{cassette_dir: "test/cassettes", mode: :record}}
+  req_http_options: [
+    plug: {ReqCassette.Plug, %{cassette_dir: "test/cassettes", mode: :record}}
+  ]
 )
 # First call costs money, subsequent calls are free!
 ```
@@ -84,12 +92,14 @@ response = Req.get!(
 ReqCassette uses Req's built-in `:plug` option to intercept HTTP requests:
 
 1. When a Req request is made with `plug: {ReqCassette.Plug, ...}`:
+
    - The plug receives a `%Plug.Conn{}` representing the outgoing request
    - It checks if a matching cassette exists
    - If yes: loads and returns the saved response
    - If no: forwards the request, saves the response, returns it
 
 2. The cassette is a JSON file containing:
+
    - HTTP status code
    - Response headers (including `content-type`)
    - Response body (as a string)
@@ -104,16 +114,16 @@ ReqCassette uses Req's built-in `:plug` option to intercept HTTP requests:
 The original prototype had several bugs that were fixed:
 
 1. **Missing request body** - POST/PUT bodies weren't being forwarded
+
    - Fixed by calling `Plug.Conn.read_body/1`
 
 2. **Response bodies not decoded** - Bodies were strings instead of maps
+
    - Root cause: Missing `content-type` header in cassettes
    - Fixed by ensuring headers are properly saved/restored
 
 3. **Poor scheme detection** - Only looked at port number
    - Fixed by using `conn.scheme` when available
-
-See [FIXES.md](FIXES.md) for detailed explanations.
 
 ## Testing
 
@@ -133,7 +143,7 @@ mix test test/req_cassette/plug_test.exs
 mix test test/req_cassette/req_llm_test.exs
 
 # Run skipped test with real API (requires ANTHROPIC_API_KEY)
-ANTHROPIC_API_KEY=sk-... mix test --include skip
+ANTHROPIC_API_KEY=sk-... mix test --include llm
 ```
 
 ### Run Demos
@@ -174,9 +184,11 @@ Example cassette file (`test/cassettes/abc123.json`):
 ### Cassette Matching
 
 Cassettes are matched by hashing:
+
 - HTTP method
 - Request path
 - Query string
+- **Request body**
 
 This creates a unique filename (e.g., `f05468d0c975ed8053216ec300d25c9d.json`).
 
@@ -185,11 +197,13 @@ This creates a unique filename (e.g., `f05468d0c975ed8053216ec300d25c9d.json`).
 ### Why Req.Test + Plug instead of :meck?
 
 ExVCR uses `:meck` to globally patch HTTP client modules. This approach:
+
 - ❌ Breaks `async: true` (global state)
 - ❌ Requires adapters for each HTTP client
 - ❌ Tightly coupled to client internals
 
 ReqCassette uses Req's native plug system:
+
 - ✅ Process-isolated (async-safe)
 - ✅ Works with any Req adapter
 - ✅ Uses stable, public APIs
@@ -206,6 +220,7 @@ ReqCassette uses Req's native plug system:
 ### Why store body as string?
 
 The cassette stores the response body as a string (not pre-decoded) because:
+
 1. It preserves the original wire format
 2. Req's `decode_body` step can process it normally
 3. Content-type header tells Req how to decode it
@@ -226,13 +241,13 @@ Potential features (not yet implemented):
 
 ## Comparison with ExVCR
 
-| Feature | ReqCassette | ExVCR |
-|---------|-------------|-------|
-| Async-safe | ✅ Yes | ❌ No (requires `async: false`) |
-| HTTP client | Req only | hackney, finch, ibrowse, etc. |
-| Implementation | Req.Test + Plug | :meck (global patching) |
-| Setup | Simple (plug option) | Medium (config + adapter) |
-| Maintenance | Low (stable APIs) | High (adapter per client) |
+| Feature        | ReqCassette          | ExVCR                           |
+| -------------- | -------------------- | ------------------------------- |
+| Async-safe     | ✅ Yes               | ❌ No (requires `async: false`) |
+| HTTP client    | Req only             | hackney, finch, ibrowse, etc.   |
+| Implementation | Req.Test + Plug      | :meck (global patching)         |
+| Setup          | Simple (plug option) | Medium (config + adapter)       |
+| Maintenance    | Low (stable APIs)    | High (adapter per client)       |
 
 ## License
 

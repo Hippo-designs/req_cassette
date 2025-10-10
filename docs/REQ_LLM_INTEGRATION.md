@@ -1,14 +1,19 @@
 # ReqLLM Integration with ReqCassette
 
-This document explains how to use ReqCassette with ReqLLM to record and replay LLM API calls, saving time and money during testing and development.
+This document explains how to use ReqCassette with ReqLLM to record and replay
+LLM API calls, saving time and money during testing and development.
 
 ## Why Use ReqCassette with ReqLLM?
 
-1. **Save Money** - LLM API calls cost money. Recording responses means you only pay once.
-2. **Faster Tests** - Replaying from cassettes is instant vs waiting for API responses.
-3. **Deterministic Tests** - Same input always gives same output (replayed from cassette).
+1. **Save Money** - LLM API calls cost money. Recording responses means you only
+   pay once.
+2. **Faster Tests** - Replaying from cassettes is instant vs waiting for API
+   responses.
+3. **Deterministic Tests** - Same input always gives same output (replayed from
+   cassette).
 4. **Offline Development** - Work without internet once cassettes are recorded.
-5. **No Rate Limits** - Run tests as many times as you want without hitting API rate limits.
+5. **No Rate Limits** - Run tests as many times as you want without hitting API
+   rate limits.
 
 ## Installation
 
@@ -90,6 +95,7 @@ end
 ## How It Works
 
 1. **First Request** (Recording):
+
    - ReqCassette intercepts the Req request to the LLM API
    - The request is forwarded to the actual API (costs money)
    - The response is saved to a JSON file (the "cassette")
@@ -104,17 +110,20 @@ end
 ## Cassette Matching
 
 Cassettes are matched by creating an MD5 hash of:
+
 - HTTP method (e.g., POST)
 - URL path (e.g., `/v1/messages`)
 - Query string
 - **Request body** (the JSON payload containing your prompt)
 
 This ensures that:
+
 - ✅ Different prompts create different cassettes
 - ✅ Same prompt replays from the same cassette
 - ✅ Different parameters (max_tokens, temperature) create different cassettes
 
 Example:
+
 ```elixir
 # These create DIFFERENT cassettes (different prompts)
 ReqLLM.generate_text(model, "Hello", max_tokens: 50)
@@ -131,16 +140,24 @@ ReqLLM.generate_text(model, "Hello", max_tokens: 50)
 
 ## Configuration Options
 
+The plug options are passed directly in your `Req` call:
+
 ```elixir
-ReqCassette.Plug.new(%{
-  cassette_dir: "test/cassettes",  # Where to store cassettes
-  mode: :record                     # :record, :all, :once, or :none
-})
+Req.get(url,
+  plug: {ReqCassette.Plug, %{
+    cassette_dir: "test/cassettes",  # Where to store cassettes
+    mode: :record                     # :record, :all, :once, or :none
+  }}
+)
 ```
 
 ### Modes
 
+Currently, only `:record` mode is implemented:
+
 - `:record` (default) - Use cassette if exists, otherwise record new one
+
+**Planned for future versions:**
 - `:all` - Always make real API call and overwrite cassette
 - `:once` - Only use existing cassettes, error if cassette missing
 - `:none` - Never record, only replay (good for CI)
@@ -163,7 +180,7 @@ ANTHROPIC_API_KEY=sk-... mix run examples/req_llm_demo.exs
 mix test test/req_cassette/req_llm_test.exs
 
 # Test with real API (requires API key, costs money - skipped by default)
-ANTHROPIC_API_KEY=sk-... mix test test/req_cassette/req_llm_test.exs --include skip
+ANTHROPIC_API_KEY=sk-... mix test --include llm
 ```
 
 ## Cassette File Format
@@ -183,7 +200,8 @@ Cassettes are stored as JSON files:
 ## Tips
 
 1. **Commit cassettes to git** - They act as fixtures for your tests
-2. **Use descriptive prompts** - Makes it easier to identify which cassette is which
+2. **Use descriptive prompts** - Makes it easier to identify which cassette is
+   which
 3. **Delete cassettes to re-record** - When you want fresh responses
 4. **Use :none mode in CI** - Ensures tests don't accidentally make API calls
 
@@ -191,14 +209,18 @@ Cassettes are stored as JSON files:
 
 ### Content-Type Header is Critical
 
-The LLM API returns JSON with `content-type: application/json`. This header **must** be preserved in the cassette, otherwise Req won't decode the JSON body and you'll get strings instead of maps.
+The LLM API returns JSON with `content-type: application/json`. This header
+**must** be preserved in the cassette, otherwise Req won't decode the JSON body
+and you'll get strings instead of maps.
 
 ✅ **Good** - Response body is decoded:
+
 ```elixir
 response.body["content"]  # Works!
 ```
 
 ❌ **Bad** - Missing content-type means body stays as string:
+
 ```elixir
 response.body["content"]  # Error: binary doesn't support Access protocol
 ```
@@ -207,7 +229,8 @@ The fixed `ReqCassette.Plug` handles this correctly.
 
 ## Advanced: Agent with Tool Calling
 
-The livebook includes `MyAgentWithCassettes`, a GenServer-based agent that supports both tool calling and cassette recording/replay:
+The livebook includes `MyAgentWithCassettes`, a GenServer-based agent that
+supports both tool calling and cassette recording/replay:
 
 ```elixir
 # Start agent with cassette support
@@ -226,6 +249,7 @@ MyAgentWithCassettes.prompt(agent, "What is 15 * 7?")
 ```
 
 The agent:
+
 - Uses non-streaming responses (required for cassettes)
 - Supports tool calling (calculator, web search)
 - Maintains conversation history
@@ -233,7 +257,8 @@ The agent:
 
 ## Streaming Support
 
-ReqLLM supports streaming, but cassettes currently only work with non-streaming responses. For streaming:
+ReqLLM supports streaming, but cassettes currently only work with non-streaming
+responses. For streaming:
 
 ```elixir
 # This won't work with cassettes
@@ -241,6 +266,7 @@ ReqLLM supports streaming, but cassettes currently only work with non-streaming 
 ```
 
 Use regular `generate_text/3` for cassette support. The livebook includes both:
+
 - `MyAgent` - Streaming version (no cassettes)
 - `MyAgentWithCassettes` - Non-streaming version (with cassettes)
 
@@ -267,7 +293,8 @@ IO.inspect(File.ls!("test/cassettes"))
 
 ### Different response each time
 
-If the cassette matching isn't working, check that your request parameters are identical:
+If the cassette matching isn't working, check that your request parameters are
+identical:
 
 ```elixir
 # These will create DIFFERENT cassettes
@@ -280,7 +307,6 @@ ReqLLM.generate_text(model, "Hello", max_tokens: 100)  # Different max_tokens!
 - See `lib/req_cassette/plug.ex` for the implementation
 - See `test/req_cassette/req_llm_test.exs` for test examples
 - See `livebooks/req_llm.livemd` for interactive examples with agents
-- Check `FIXES.md` for details on bug fixes
 
 ## Contributing
 

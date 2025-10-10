@@ -724,4 +724,3 @@ wish to migrate to ReqCassette, the process is designed to be straightforward.
     [https://elixirschool.com/en/lessons/testing/bypass](https://elixirschool.com/en/lessons/testing/bypass)
 20. bypass v2.1.0 \- HexDocs, accessed October 10, 2025,
     [https://hexdocs.pm/bypass/Bypass.html](https://hexdocs.pm/bypass/Bypass.html)
-

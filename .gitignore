@@ -39,3 +39,5 @@ test/fixtures/cassettes
 # Livebook cassette directories
 livebooks/cassettes
 livebooks/agent_cassettes
+test/fixtures/llm_agent_cassettes
+test/fixtures/agent_cassettes

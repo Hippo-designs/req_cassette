@@ -2,7 +2,8 @@
 
 ```elixir
 Mix.install([
-  {:req_llm, "~> 1.0.0-rc.5"},
+  # Using upstream fix branch until https://github.com/agentjido/req_llm/issues/93 is closed
+  {:req_llm, github: "lostbean/req_llm", branch: "egomes/fix-claude-multi-turn"},
   {:req_cassette, path: Path.join(__DIR__, "..")}
 ])
 ```
@@ -110,6 +111,304 @@ if cassettes != [] do
   IO.puts("Body: #{String.slice(cassette_data["body"], 0, 100)}...")
 end
 ```
+
+## AI Agent with Tool Calling
+
+### MyAgentWithCassettes - Cassette-Compatible Agent
+
+This agent uses non-streaming responses so it can work with ReqCassette for record/replay.
+
+```elixir
+defmodule MyAgentWithCassettes do
+  @moduledoc """
+  A GenServer-based AI agent that supports ReqCassette for recording and replaying LLM calls.
+
+  Uses non-streaming responses to enable cassette support. All LLM calls are recorded
+  to cassettes and can be replayed without making actual API calls.
+
+  ## Usage
+
+      # Start the agent with cassette support
+      {:ok, agent} = MyAgentWithCassettes.start_link(
+        cassette_opts: [
+          cassette_dir: "cassettes",
+          mode: :record
+        ]
+      )
+
+      # Send a prompt (first call records, subsequent calls replay)
+      MyAgentWithCassettes.prompt(agent, "What's 15 * 7?")
+
+  ## Features
+
+  - Non-streaming text generation (enables cassette support)
+  - Tool calling with proper argument parsing
+  - Conversation history maintenance
+  - Automatic cassette recording and replay
+  - Calculator and web search tools included
+  """
+  use GenServer
+
+  alias ReqLLM.{Context, Tool, Response}
+  alias ReqLLM.Message.ContentPart
+
+  defstruct [:history, :tools, :model, :req_http_options]
+
+  @default_model "anthropic:claude-sonnet-4-20250514"
+
+  def start_link(opts \\ []) do
+    GenServer.start_link(__MODULE__, opts)
+  end
+
+  def prompt(pid, message) when is_binary(message) do
+    GenServer.call(pid, {:prompt, message}, 30_000)
+  end
+
+  @impl true
+  def init(opts) do
+    system_prompt =
+      Keyword.get(opts, :system_prompt, """
+      You are a helpful AI assistant with access to tools.
+
+      When you need to compute math, use the calculator tool with the expression parameter.
+
+      Do not wrap arguments in code fences. Do not include extra text in arguments.
+
+      When you need to search for information, use the web_search tool with a relevant query.
+
+      Always use tools when appropriate and provide clear, helpful responses.
+      """)
+
+    model = Keyword.get(opts, :model, @default_model)
+    tools = setup_tools()
+
+    # Setup cassette configuration
+    req_http_options =
+      case Keyword.get(opts, :cassette_opts) do
+        nil ->
+          []
+
+        cassette_opts ->
+          [plug: {ReqCassette.Plug, Map.new(cassette_opts)}]
+      end
+
+    history = Context.new([Context.system(system_prompt)])
+
+    {:ok,
+     %__MODULE__{
+       history: history,
+       tools: tools,
+       model: model,
+       req_http_options: req_http_options
+     }}
+  end
+
+  @impl true
+  def handle_call({:prompt, message}, _from, state) do
+    new_history = Context.append(state.history, Context.user(message))
+
+    case generate_with_tools(state.model, new_history, state.tools, state.req_http_options) do
+      {:ok, final_history, final_response} ->
+        {:reply, {:ok, final_response}, %{state | history: final_history}}
+
+      {:error, error} ->
+        IO.puts("Error: #{inspect(error)}")
+        {:reply, {:error, error}, state}
+    end
+  end
+
+  defp generate_with_tools(model, history, tools, req_http_options) do
+    # Make initial request with tools
+    case ReqLLM.generate_text(
+           model,
+           history.messages,
+           tools: tools,
+           max_tokens: 1024,
+           req_http_options: req_http_options
+         ) do
+      {:ok, response} ->
+        text = Response.text(response)
+        IO.puts("Assistant: #{text}")
+
+        # Check if any tools were called
+        tool_calls = extract_tool_calls(response)
+
+        if tool_calls == [] do
+          # No tools called, we're done
+          final_history = Context.append(history, Context.assistant(text))
+          {:ok, final_history, text}
+        else
+          # Tools were called, execute them and make follow-up request
+          IO.puts("\n🔧 Executing tools...")
+
+          assistant_message = Context.assistant_with_tools(text, tool_calls)
+          history_with_tool_call = Context.append(history, assistant_message)
+
+          # Execute tools and collect results as ContentParts
+          tool_result_parts =
+            Enum.map(tool_calls, fn tool_call ->
+              tool = Enum.find(tools, fn t -> t.name == tool_call.name end)
+
+              if tool do
+                case ReqLLM.Tool.execute(tool, tool_call.arguments) do
+                  {:ok, result} ->
+                    IO.puts(
+                      "  #{tool_call.name}(#{inspect(tool_call.arguments)}) → #{inspect(result)}"
+                    )
+
+                    ContentPart.tool_result(tool_call.id, result)
+
+                  {:error, error} ->
+                    IO.puts("  ❌ #{tool_call.name}: #{inspect(error)}")
+                    error_result = %{error: "Tool execution failed: #{inspect(error)}"}
+                    ContentPart.tool_result(tool_call.id, error_result)
+                end
+              else
+                IO.puts("  ❌ Tool #{tool_call.name} not found")
+                ContentPart.tool_result(tool_call.id, %{error: "Tool not found"})
+              end
+            end)
+
+          # Append tool results as a user message (required by Anthropic API)
+          history_with_results = Context.append(history_with_tool_call, Context.user(tool_result_parts))
+
+          # Make follow-up request with tool results
+          IO.puts("\n")
+
+          case ReqLLM.generate_text(
+                 model,
+                 history_with_results.messages,
+                 max_tokens: 1024,
+                 req_http_options: req_http_options
+               ) do
+            {:ok, final_response} ->
+              final_text = Response.text(final_response)
+              IO.puts("Assistant: #{final_text}")
+
+              final_history = Context.append(history_with_results, Context.assistant(final_text))
+              {:ok, final_history, final_text}
+
+            {:error, error} ->
+              {:error, error}
+          end
+        end
+
+      {:error, error} ->
+        {:error, error}
+    end
+  end
+
+  defp extract_tool_calls(%Response{} = response) do
+    # Use ReqLLM's built-in tool_calls function
+    Response.tool_calls(response)
+  end
+
+  defp setup_tools do
+    [
+      Tool.new!(
+        name: "calculator",
+        description: "Perform mathematical calculations. Pass an expression string.",
+        parameter_schema: [
+          expression: [
+            type: :string,
+            required: true,
+            doc: "Mathematical expression to evaluate. Examples: '15 * 7', '10 + 5', 'sqrt(16)'"
+          ]
+        ],
+        callback: &calculator_callback/1
+      ),
+      Tool.new!(
+        name: "web_search",
+        description: "Search the web for information",
+        parameter_schema: [
+          query: [type: :string, required: true, doc: "Search query"]
+        ],
+        callback: fn %{"query" => query} ->
+          {:ok, "Mock search results for: #{query}"}
+        end
+      )
+    ]
+  end
+
+  defp calculator_callback(%{"expression" => expr}) when is_binary(expr) do
+    {result, _} = Code.eval_string(expr)
+    {:ok, result}
+  rescue
+    e -> {:error, "Invalid expression: #{Exception.message(e)}"}
+  end
+
+  defp calculator_callback(%{expression: expr}) when is_binary(expr) do
+    {result, _} = Code.eval_string(expr)
+    {:ok, result}
+  rescue
+    e -> {:error, "Invalid expression: #{Exception.message(e)}"}
+  end
+
+  defp calculator_callback(args) do
+    {:error, "Provide an expression string. Example: {\"expression\":\"15 * 7\"}. Got: #{inspect(args)}"}
+  end
+end
+```
+
+### Using MyAgentWithCassettes
+
+```elixir
+# Create cassette directory for agent
+agent_cassette_dir = Path.join(__DIR__, "agent_cassettes")
+
+# Clean up old cassettes for fresh testing
+File.rm_rf!(agent_cassette_dir)
+File.mkdir_p!(agent_cassette_dir)
+
+agent_cassettes = File.ls!(agent_cassette_dir)
+IO.puts("Agent cassettes created: #{length(agent_cassettes)}")
+
+# Start agent with cassette support
+{:ok, cassette_agent} =
+  MyAgentWithCassettes.start_link(
+    cassette_opts: [
+      cassette_dir: agent_cassette_dir,
+      mode: :record
+    ]
+  )
+
+IO.puts("✅ Agent started with cassette support (cassettes cleaned)")
+```
+
+```elixir
+# First call - will record to cassette (costs money)
+MyAgentWithCassettes.prompt(cassette_agent, "What is 15 * 7?")
+```
+
+```elixir
+# Second identical call - will replay from cassette (FREE!)
+MyAgentWithCassettes.prompt(cassette_agent, "What is 15 * 7?")
+```
+
+```elixir
+# First call - will record to cassette (costs money)
+MyAgentWithCassettes.prompt(cassette_agent, "Make a joke with the result of 35 - 11?")
+```
+
+```elixir
+# Second identical call - will replay from cassette (FREE!)
+MyAgentWithCassettes.prompt(cassette_agent, "Make a joke with the result of 35 - 11?")
+```
+
+```elixir
+# Verify cassettes were created
+agent_cassettes = File.ls!(agent_cassette_dir)
+IO.puts("Agent cassettes created: #{length(agent_cassettes)}")
+
+# Each tool execution and follow-up creates separate cassettes
+Enum.each(agent_cassettes, fn cassette ->
+  IO.puts("  - #{cassette}")
+end)
+```
+
+### MyAgent - Streaming Version (No Cassette Support)
+
+This is the original streaming agent. It provides real-time output but cannot use cassettes.
 
 ```elixir
 defmodule MyAgent do
@@ -482,5 +781,3 @@ MyAgent.prompt(
 MyAgent.prompt(
   agent, "Now multiply the previous two results")
 ```
-
-***REMOVED***

@@ -29,7 +29,12 @@ defmodule ReqCassette.MixProject do
       {:req, "~> 0.5.15"},
       {:plug, "~> 1.18"},
       {:jason, "~> 1.4"},
-      {:req_llm, "~> 1.0.0-rc.5", only: [:dev, :test], runtime: false},
+      # Using upstream fix branch until https://github.com/agentjido/req_llm/issues/93 is closed
+      {:req_llm,
+       github: "lostbean/req_llm",
+       branch: "egomes/fix-claude-multi-turn",
+       only: [:dev, :test],
+       runtime: false},
       {:bypass, "~> 2.1", only: :test},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
