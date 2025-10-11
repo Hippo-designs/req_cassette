@@ -12,7 +12,17 @@ defmodule ReqCassette.MixProject do
       preferred_cli_env: [
         precommit: :test,
         ci: :test
-      ]
+      ],
+
+      # Hex
+      description: "VCR-style record-and-replay library for Req HTTP client",
+      package: package(),
+
+      # Docs
+      name: "ReqCassette",
+      source_url: "https://github.com/lostbean/req_cassette",
+      homepage_url: "https://github.com/lostbean/req_cassette",
+      docs: docs()
     ]
   end
 
@@ -36,7 +46,8 @@ defmodule ReqCassette.MixProject do
        only: [:dev, :test],
        runtime: false},
       {:bypass, "~> 2.1", only: :test},
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:ex_doc, "~> 0.31", only: :dev, runtime: false}
     ]
   end
 
@@ -53,6 +64,28 @@ defmodule ReqCassette.MixProject do
         "credo --strict",
         "test"
       ]
+    ]
+  end
+
+  defp package do
+    [
+      licenses: ["MIT"],
+      links: %{
+        "GitHub" => "https://github.com/lostbean/req_cassette"
+      },
+      maintainers: ["Edgar Gomes"],
+      files: ~w(lib .formatter.exs mix.exs README.md LICENSE)
+    ]
+  end
+
+  defp docs do
+    [
+      main: "ReqCassette",
+      extras: [
+        "docs/REQ_LLM_INTEGRATION.md": [title: "ReqLLM Integration Guide"]
+      ],
+      source_ref: "v0.1.0",
+      formatters: ["html"]
     ]
   end
 end
