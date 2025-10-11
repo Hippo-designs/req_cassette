@@ -102,6 +102,9 @@ defmodule ReqCassette.Plug do
 
   import Plug.Conn
 
+  alias Plug.Conn
+  alias Req.Steps
+
   @typedoc """
   Options for configuring the cassette plug.
 
@@ -151,11 +154,11 @@ defmodule ReqCassette.Plug do
 
   A `Plug.Conn` struct with the response set.
   """
-  @spec call(Plug.Conn.t(), opts()) :: Plug.Conn.t()
+  @spec call(Conn.t(), opts()) :: Conn.t()
   def call(conn, opts) do
     # Read the body first so we can include it in the cassette key
-    conn = Plug.Conn.fetch_query_params(conn)
-    {:ok, body, conn} = Plug.Conn.read_body(conn)
+    conn = Conn.fetch_query_params(conn)
+    {:ok, body, conn} = Conn.read_body(conn)
 
     key = cassette_key(conn, body, opts)
 
@@ -164,7 +167,7 @@ defmodule ReqCassette.Plug do
         conn
         |> put_resp_headers(headers)
         |> send_resp(status, serialize_body(response_body))
-        |> Plug.Conn.halt()
+        |> Conn.halt()
 
       :not_found ->
         {conn, resp_or_error} = forward_and_capture(conn, body, opts)
@@ -274,7 +277,7 @@ defmodule ReqCassette.Plug do
       end
 
     # Create a new Req without the plug option to avoid infinite recursion
-    req = Req.new(adapter: &Req.Steps.run_finch/1)
+    req = Req.new(adapter: &Steps.run_finch/1)
 
     resp = Req.request(req, req_opts)
     {conn, resp}
@@ -284,7 +287,7 @@ defmodule ReqCassette.Plug do
     conn
     |> put_resp_headers(headers)
     |> send_resp(status, serialize_body(body))
-    |> Plug.Conn.halt()
+    |> Conn.halt()
   end
 
   defp serialize_body(body) when is_binary(body), do: body
@@ -315,7 +318,7 @@ defmodule ReqCassette.Plug do
             to_string(other)
         end
 
-      Plug.Conn.put_resp_header(acc, k, value)
+      Conn.put_resp_header(acc, k, value)
     end)
   end
 end

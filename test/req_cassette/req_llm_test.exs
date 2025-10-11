@@ -1,6 +1,9 @@
 defmodule ReqCassette.ReqLLMTest do
   use ExUnit.Case, async: true
 
+  alias Plug.Conn
+  alias ReqLLM.Response
+
   @moduletag :req_llm
   @cassette_dir "test/fixtures/llm_cassettes"
 
@@ -36,8 +39,8 @@ defmodule ReqCassette.ReqLLMTest do
           ]
         )
 
-      assert %ReqLLM.Response{} = response1
-      text1 = ReqLLM.Response.text(response1)
+      assert %Response{} = response1
+      text1 = Response.text(response1)
       assert is_binary(text1)
       assert String.length(text1) > 0
 
@@ -58,7 +61,7 @@ defmodule ReqCassette.ReqLLMTest do
         )
 
       # Both responses should be identical (replayed from cassette)
-      text2 = ReqLLM.Response.text(response2)
+      text2 = Response.text(response2)
       assert text1 == text2
       assert response1.id == response2.id
 
@@ -74,7 +77,7 @@ defmodule ReqCassette.ReqLLMTest do
       # Mock Anthropic API response
       Bypass.expect_once(bypass, "POST", "/v1/messages", fn conn ->
         # Read request body to verify it's being sent
-        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        {:ok, body, conn} = Conn.read_body(conn)
         request_data = Jason.decode!(body)
 
         # Verify the request has the expected structure
@@ -101,8 +104,8 @@ defmodule ReqCassette.ReqLLMTest do
         }
 
         conn
-        |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, Jason.encode!(response))
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(response))
       end)
 
       # Make the request through our cassette plug

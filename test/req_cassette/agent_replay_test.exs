@@ -22,7 +22,7 @@ defmodule ReqCassette.AgentReplayTest do
     """
     use GenServer
 
-    alias ReqLLM.{Context, Tool, Response}
+    alias ReqLLM.{Context, Tool, Response, Message}
     alias ReqLLM.Message.ContentPart
 
     defstruct [:history, :tools, :model, :req_http_options]
@@ -90,75 +90,81 @@ defmodule ReqCassette.AgentReplayTest do
     end
 
     defp generate_with_tools(model, history, tools, req_http_options) do
-      # Make initial request with tools
+      with {:ok, response} <- generate_initial_response(model, history, tools, req_http_options),
+           text <- Response.text(response),
+           tool_calls <- extract_tool_calls(response) do
+        handle_tool_calls(model, history, tools, req_http_options, text, tool_calls)
+      end
+    end
+
+    defp generate_initial_response(model, history, tools, req_http_options) do
+      ReqLLM.generate_text(
+        model,
+        history.messages,
+        tools: tools,
+        max_tokens: 1024,
+        req_http_options: req_http_options
+      )
+    end
+
+    defp handle_tool_calls(_model, history, _tools, _req_http_options, text, []) do
+      # No tools called, we're done
+      final_history = Context.append(history, Context.assistant(text))
+      {:ok, final_history, text}
+    end
+
+    defp handle_tool_calls(model, history, tools, req_http_options, text, tool_calls) do
+      assistant_message = Context.assistant_with_tools(text, tool_calls)
+      history_with_tool_call = Context.append(history, assistant_message)
+
+      tool_result_parts = execute_tool_calls(tool_calls, tools)
+
+      tool_results_message = %Message{
+        role: :user,
+        content: tool_result_parts
+      }
+
+      history_with_results = Context.append(history_with_tool_call, tool_results_message)
+
+      generate_final_response(model, history_with_results, req_http_options)
+    end
+
+    defp execute_tool_calls(tool_calls, tools) do
+      Enum.map(tool_calls, fn tool_call ->
+        execute_single_tool(tool_call, tools)
+      end)
+    end
+
+    defp execute_single_tool(tool_call, tools) do
+      tool = Enum.find(tools, fn t -> t.name == tool_call.name end)
+
+      case tool do
+        nil ->
+          ContentPart.tool_result(tool_call.id, %{error: "Tool not found"})
+
+        tool ->
+          case Tool.execute(tool, tool_call.arguments) do
+            {:ok, result} ->
+              ContentPart.tool_result(tool_call.id, result)
+
+            {:error, error} ->
+              error_result = %{error: "Tool execution failed: #{inspect(error)}"}
+              ContentPart.tool_result(tool_call.id, error_result)
+          end
+      end
+    end
+
+    defp generate_final_response(model, history_with_results, req_http_options) do
       case ReqLLM.generate_text(
              model,
-             history.messages,
-             tools: tools,
+             history_with_results.messages,
              max_tokens: 1024,
              req_http_options: req_http_options
            ) do
-        {:ok, response} ->
-          text = Response.text(response)
-
-          # Check if any tools were called
-          tool_calls = extract_tool_calls(response)
-
-          if tool_calls == [] do
-            # No tools called, we're done
-            final_history = Context.append(history, Context.assistant(text))
-            {:ok, final_history, text}
-          else
-            # Tools were called, execute them and make follow-up request
-            assistant_message = Context.assistant_with_tools(text, tool_calls)
-            history_with_tool_call = Context.append(history, assistant_message)
-
-            # Execute tools and collect results as ContentParts
-            tool_result_parts =
-              Enum.map(tool_calls, fn tool_call ->
-                tool = Enum.find(tools, fn t -> t.name == tool_call.name end)
-
-                if tool do
-                  case ReqLLM.Tool.execute(tool, tool_call.arguments) do
-                    {:ok, result} ->
-                      ContentPart.tool_result(tool_call.id, result)
-
-                    {:error, error} ->
-                      error_result = %{error: "Tool execution failed: #{inspect(error)}"}
-                      ContentPart.tool_result(tool_call.id, error_result)
-                  end
-                else
-                  ContentPart.tool_result(tool_call.id, %{error: "Tool not found"})
-                end
-              end)
-
-            # Append tool results as a user message (required by Anthropic API)
-            tool_results_message = %ReqLLM.Message{
-              role: :user,
-              content: tool_result_parts
-            }
-
-            history_with_results = Context.append(history_with_tool_call, tool_results_message)
-
-            # Make follow-up request with tool results
-            case ReqLLM.generate_text(
-                   model,
-                   history_with_results.messages,
-                   max_tokens: 1024,
-                   req_http_options: req_http_options
-                 ) do
-              {:ok, final_response} ->
-                final_text = Response.text(final_response)
-
-                final_history =
-                  Context.append(history_with_results, Context.assistant(final_text))
-
-                {:ok, final_history, final_text}
-
-              {:error, error} ->
-                {:error, error}
-            end
-          end
+        {:ok, final_response} ->
+          final_text = Response.text(final_response)
+          final_history = Context.append(history_with_results, Context.assistant(final_text))
+          {:ok, final_history, final_text}
 
         {:error, error} ->
           {:error, error}
@@ -167,7 +173,7 @@ defmodule ReqCassette.AgentReplayTest do
 
     defp extract_tool_calls(response) do
       case response.message do
-        %ReqLLM.Message{content: content} when is_list(content) ->
+        %Message{content: content} when is_list(content) ->
           content
           |> Enum.filter(fn
             %{type: :tool_call} -> true

@@ -1,6 +1,8 @@
 defmodule ReqCassette.PlugTest do
   use ExUnit.Case, async: true
 
+  alias Plug.Conn
+
   @cassette_dir "test/fixtures/cassettes"
 
   setup do
@@ -16,8 +18,8 @@ defmodule ReqCassette.PlugTest do
 
       Bypass.expect_once(bypass, "GET", "/users/1", fn conn ->
         conn
-        |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, Jason.encode!(%{id: 1, name: "Alice"}))
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{id: 1, name: "Alice"}))
       end)
 
       # Create a Req request that uses our cassette plug
@@ -42,8 +44,8 @@ defmodule ReqCassette.PlugTest do
       # First request - record
       Bypass.expect_once(bypass, "GET", "/users/2", fn conn ->
         conn
-        |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, Jason.encode!(%{id: 2, name: "Bob"}))
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{id: 2, name: "Bob"}))
       end)
 
       _first_response =
@@ -71,12 +73,12 @@ defmodule ReqCassette.PlugTest do
       bypass = Bypass.open()
 
       Bypass.expect_once(bypass, "POST", "/users", fn conn ->
-        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        {:ok, body, conn} = Conn.read_body(conn)
         user = Jason.decode!(body)
 
         conn
-        |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(
           201,
           Jason.encode!(%{id: 3, name: user["name"], email: user["email"]})
         )
@@ -98,12 +100,12 @@ defmodule ReqCassette.PlugTest do
 
       # Set up bypass to handle multiple requests
       Bypass.expect(bypass, "POST", "/api", fn conn ->
-        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        {:ok, body, conn} = Conn.read_body(conn)
         data = Jason.decode!(body)
 
         conn
-        |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, Jason.encode!(%{result: "Response to: #{data["prompt"]}"}))
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{result: "Response to: #{data["prompt"]}"}))
       end)
 
       # First request with prompt "Hello"
