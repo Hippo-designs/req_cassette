@@ -1,5 +1,10 @@
 # ReqCassette
 
+[![Hex.pm](https://img.shields.io/hexpm/v/req_cassette.svg)](https://hex.pm/packages/req_cassette)
+[![Hex Docs](https://img.shields.io/badge/hex-docs-lightgreen.svg)](https://hexdocs.pm/req_cassette/)
+[![GitHub CI](https://github.com/lostbean/req_cassette/workflows/CI/badge.svg)](https://github.com/lostbean/req_cassette/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A VCR-style record-and-replay library for Elixir's [Req](https://hexdocs.pm/req)
 HTTP client. Record HTTP responses to "cassettes" and replay them in tests for
 fast, deterministic, offline-capable testing.
@@ -161,7 +166,7 @@ The cassette is matched by HTTP method, path, query string, and request body.
 
 ## License
 
-[Add your license]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Contributing
 
