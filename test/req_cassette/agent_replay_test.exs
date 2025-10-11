@@ -2,7 +2,7 @@ defmodule ReqCassette.AgentReplayTest do
   use ExUnit.Case, async: false
   require Logger
 
-  @moduletag :llm_agent
+  @moduletag :req_llm
   @cassette_dir "test/fixtures/agent_cassettes"
 
   setup do
@@ -234,7 +234,7 @@ defmodule ReqCassette.AgentReplayTest do
   end
 
   describe "Agent cassette replay" do
-    @tag :llm
+    @tag :req_llm
     @tag :capture_log
     test "single prompt with tool should replay correctly" do
       cassette_opts = %{cassette_dir: @cassette_dir, mode: :record}
@@ -263,7 +263,7 @@ defmodule ReqCassette.AgentReplayTest do
              "New cassettes were created on replay. Expected: #{length(cassettes_after_first)}, Got: #{length(cassettes_after_second)}"
     end
 
-    @tag :llm
+    @tag :req_llm
     @tag :capture_log
     test "multiple prompts should replay correctly from same agent" do
       cassette_opts = %{cassette_dir: @cassette_dir, mode: :record}

@@ -15,11 +15,11 @@ defmodule ReqCassette.ReqLLMTest do
   end
 
   describe "ReqLLM integration" do
-    @tag :llm
+    @tag :req_llm
     test "records and replays LLM text generation" do
       # This test requires ANTHROPIC_API_KEY environment variable
       # Skip by default to avoid API costs
-      # Run with: ANTHROPIC_API_KEY=sk-... mix test --include skip
+      # Run with: ANTHROPIC_API_KEY=sk-... mix test --include req_llm
 
       model = "anthropic:claude-sonnet-4-20250514"
       prompt = "Make a poem about Elixir"

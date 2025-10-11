@@ -122,7 +122,7 @@ Some tests require API keys and are skipped by default:
 
 ```bash
 # Run all tests including skipped ones
-ANTHROPIC_API_KEY=sk-... mix test --include llm
+ANTHROPIC_API_KEY=sk-... mix test --include req_llm
 ```
 
 ## Demo Scripts

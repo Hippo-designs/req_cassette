@@ -143,7 +143,7 @@ mix test test/req_cassette/plug_test.exs
 mix test test/req_cassette/req_llm_test.exs
 
 # Run skipped test with real API (requires ANTHROPIC_API_KEY)
-ANTHROPIC_API_KEY=sk-... mix test --include llm
+ANTHROPIC_API_KEY=sk-... mix test --include req_llm
 ```
 
 ### Run Demos

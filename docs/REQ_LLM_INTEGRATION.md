@@ -180,7 +180,7 @@ ANTHROPIC_API_KEY=sk-... mix run examples/req_llm_demo.exs
 mix test test/req_cassette/req_llm_test.exs
 
 # Test with real API (requires API key, costs money - skipped by default)
-ANTHROPIC_API_KEY=sk-... mix test --include llm
+ANTHROPIC_API_KEY=sk-... mix test --include req_llm
 ```
 
 ## Cassette File Format
