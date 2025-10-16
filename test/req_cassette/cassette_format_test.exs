@@ -1,6 +1,7 @@
 defmodule ReqCassette.CassetteFormatTest do
   use ExUnit.Case, async: true
 
+  alias Plug.Conn
   alias ReqCassette.Cassette
 
   @cassette_dir "test/fixtures/cassette_format"
@@ -37,7 +38,7 @@ defmodule ReqCassette.CassetteFormatTest do
       bypass = Bypass.open()
 
       Bypass.expect_once(bypass, "GET", "/test", fn conn ->
-        Plug.Conn.resp(conn, 200, "OK")
+        Conn.resp(conn, 200, "OK")
       end)
 
       # Make a request
@@ -147,8 +148,8 @@ defmodule ReqCassette.CassetteFormatTest do
 
       Bypass.expect_once(bypass, "GET", "/json", fn conn ->
         conn
-        |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, Jason.encode!(%{id: 1, name: "Test", tags: ["a", "b"]}))
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{id: 1, name: "Test", tags: ["a", "b"]}))
       end)
 
       response = Req.get!("http://localhost:#{bypass.port}/json")
@@ -192,8 +193,8 @@ defmodule ReqCassette.CassetteFormatTest do
 
       Bypass.expect_once(bypass, "GET", "/image", fn conn ->
         conn
-        |> Plug.Conn.put_resp_content_type("image/png")
-        |> Plug.Conn.resp(200, png_header)
+        |> Conn.put_resp_content_type("image/png")
+        |> Conn.resp(200, png_header)
       end)
 
       response = Req.get!("http://localhost:#{bypass.port}/image")
@@ -235,8 +236,8 @@ defmodule ReqCassette.CassetteFormatTest do
 
       Bypass.expect_once(bypass, "GET", "/html", fn conn ->
         conn
-        |> Plug.Conn.put_resp_content_type("text/html")
-        |> Plug.Conn.resp(200, "<html><body>Hello</body></html>")
+        |> Conn.put_resp_content_type("text/html")
+        |> Conn.resp(200, "<html><body>Hello</body></html>")
       end)
 
       response = Req.get!("http://localhost:#{bypass.port}/html")
@@ -298,11 +299,11 @@ defmodule ReqCassette.CassetteFormatTest do
 
       # Create responses
       Bypass.expect(bypass, "GET", "/1", fn conn ->
-        Plug.Conn.resp(conn, 200, "Response 1")
+        Conn.resp(conn, 200, "Response 1")
       end)
 
       Bypass.expect(bypass, "GET", "/2", fn conn ->
-        Plug.Conn.resp(conn, 200, "Response 2")
+        Conn.resp(conn, 200, "Response 2")
       end)
 
       response1 = Req.get!("http://localhost:#{bypass.port}/1")

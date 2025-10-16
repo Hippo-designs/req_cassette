@@ -135,7 +135,7 @@ defmodule ReqCassette.MatchingTest do
 
       Bypass.expect(bypass, "GET", "/data", fn conn ->
         # Parse query and return different responses
-        query = Plug.Conn.fetch_query_params(conn).query_params
+        query = Conn.fetch_query_params(conn).query_params
 
         response =
           if query["id"] == "1" do

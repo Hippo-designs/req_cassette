@@ -253,6 +253,8 @@ defmodule ReqCassette.Plug do
 
   alias Plug.Conn
   alias Req.Steps
+  alias ReqCassette.BodyType
+  alias ReqCassette.Cassette
 
   @typedoc """
   Options for configuring the cassette plug.
@@ -448,15 +450,15 @@ defmodule ReqCassette.Plug do
   defp handle_replay(conn, body, opts) do
     path = cassette_path(opts)
 
-    case ReqCassette.Cassette.load(path) do
+    case Cassette.load(path) do
       {:ok, cassette} ->
         match_on = opts[:match_requests_on] || [:method, :uri, :query, :headers, :body]
 
-        case ReqCassette.Cassette.find_interaction(cassette, conn, body, match_on) do
+        case Cassette.find_interaction(cassette, conn, body, match_on) do
           {:ok, response} ->
             conn
             |> put_resp_headers(response["headers"])
-            |> send_resp(response["status"], ReqCassette.BodyType.decode(response))
+            |> send_resp(response["status"], BodyType.decode(response))
             |> Conn.halt()
 
           :not_found ->
@@ -487,11 +489,11 @@ defmodule ReqCassette.Plug do
     resp = normalize_response(resp_or_error)
 
     # Create new cassette or overwrite existing
-    cassette = ReqCassette.Cassette.new()
-    cassette = ReqCassette.Cassette.add_interaction(cassette, conn, body, resp, opts)
+    cassette = Cassette.new()
+    cassette = Cassette.add_interaction(cassette, conn, body, resp, opts)
 
     path = cassette_path(opts)
-    ReqCassette.Cassette.save(path, cassette)
+    Cassette.save(path, cassette)
 
     resp_to_conn(conn, resp)
   end
@@ -499,17 +501,17 @@ defmodule ReqCassette.Plug do
   defp handle_record_missing(conn, body, opts) do
     path = cassette_path(opts)
 
-    case ReqCassette.Cassette.load(path) do
+    case Cassette.load(path) do
       {:ok, cassette} ->
         # Cassette exists - try to find matching interaction
         match_on = opts[:match_requests_on] || [:method, :uri, :query, :headers, :body]
 
-        case ReqCassette.Cassette.find_interaction(cassette, conn, body, match_on) do
+        case Cassette.find_interaction(cassette, conn, body, match_on) do
           {:ok, response} ->
             # Found matching interaction - replay it
             conn
             |> put_resp_headers(response["headers"])
-            |> send_resp(response["status"], ReqCassette.BodyType.decode(response))
+            |> send_resp(response["status"], BodyType.decode(response))
             |> Conn.halt()
 
           :not_found ->
@@ -518,8 +520,8 @@ defmodule ReqCassette.Plug do
             resp = normalize_response(resp_or_error)
 
             # Add new interaction to existing cassette
-            cassette = ReqCassette.Cassette.add_interaction(cassette, conn, body, resp, opts)
-            ReqCassette.Cassette.save(path, cassette)
+            cassette = Cassette.add_interaction(cassette, conn, body, resp, opts)
+            Cassette.save(path, cassette)
 
             resp_to_conn(conn, resp)
         end
@@ -529,9 +531,9 @@ defmodule ReqCassette.Plug do
         {conn, resp_or_error} = forward_and_capture(conn, body, opts)
         resp = normalize_response(resp_or_error)
 
-        cassette = ReqCassette.Cassette.new()
-        cassette = ReqCassette.Cassette.add_interaction(cassette, conn, body, resp, opts)
-        ReqCassette.Cassette.save(path, cassette)
+        cassette = Cassette.new()
+        cassette = Cassette.add_interaction(cassette, conn, body, resp, opts)
+        Cassette.save(path, cassette)
 
         resp_to_conn(conn, resp)
     end

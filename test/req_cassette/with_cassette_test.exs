@@ -72,7 +72,7 @@ defmodule ReqCassette.WithCassetteTest do
       assert body["name"] == "Alice"
     end
 
-    test "works without opts argument" do
+    test "works with 2-arity form (name, fun)" do
       bypass = Bypass.open()
 
       Bypass.expect_once(bypass, "GET", "/hello", fn conn ->
@@ -81,14 +81,42 @@ defmodule ReqCassette.WithCassetteTest do
         |> Conn.resp(200, Jason.encode!(%{greeting: "Hi"}))
       end)
 
-      # Call with minimal opts (cassette_dir only)
+      # 2-arity: with_cassette(name, fun) - uses default cassette_dir
       result =
-        with_cassette("no_opts", [cassette_dir: @cassette_dir], fn plug ->
+        with_cassette("two_arity_test", fn plug ->
           Req.get!("http://localhost:#{bypass.port}/hello", plug: plug)
         end)
 
       assert result.status == 200
       assert result.body["greeting"] == "Hi"
+
+      # Verify cassette was created in default location (test/cassettes)
+      assert File.exists?("test/cassettes/two_arity_test.json")
+
+      # Clean up
+      File.rm("test/cassettes/two_arity_test.json")
+    end
+
+    test "works with 3-arity form (name, opts, fun)" do
+      bypass = Bypass.open()
+
+      Bypass.expect_once(bypass, "GET", "/hello", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{greeting: "Howdy"}))
+      end)
+
+      # 3-arity: with_cassette(name, opts, fun) - custom cassette_dir
+      result =
+        with_cassette("three_arity_test", [cassette_dir: @cassette_dir], fn plug ->
+          Req.get!("http://localhost:#{bypass.port}/hello", plug: plug)
+        end)
+
+      assert result.status == 200
+      assert result.body["greeting"] == "Howdy"
+
+      # Verify cassette was created in custom location
+      assert File.exists?(Path.join(@cassette_dir, "three_arity_test.json"))
     end
 
     test "supports mode: :replay" do

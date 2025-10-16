@@ -138,6 +138,7 @@ defmodule ReqCassette.Cassette do
   """
 
   alias ReqCassette.BodyType
+  alias ReqCassette.Filter
 
   @version "1.0"
 
@@ -263,7 +264,7 @@ defmodule ReqCassette.Cassette do
     interaction = build_interaction(conn, request_body, response)
 
     # Apply filters before adding to cassette
-    filtered_interaction = ReqCassette.Filter.apply_filters(interaction, opts)
+    filtered_interaction = Filter.apply_filters(interaction, opts)
 
     Map.update!(cassette, "interactions", fn interactions ->
       interactions ++ [filtered_interaction]

@@ -260,8 +260,15 @@ defmodule ReqCassette do
   """
   @spec with_cassette(String.t(), keyword(), (plug :: term() -> result)) :: result
         when result: any()
-  def with_cassette(name, opts \\ [], fun)
+  @spec with_cassette(String.t(), (plug :: term() -> result)) :: result
+        when result: any()
 
+  # 2-arity: with_cassette(name, fun)
+  def with_cassette(name, fun) when is_function(fun, 1) do
+    with_cassette(name, [], fun)
+  end
+
+  # 3-arity: with_cassette(name, opts, fun)
   def with_cassette(name, opts, fun) when is_function(fun, 1) do
     plug_opts = %{
       cassette_name: name,

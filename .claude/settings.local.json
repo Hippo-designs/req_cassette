@@ -1,14 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(mix test:*)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:hexdocs.pm)",
       "WebFetch(domain:agentclientprotocol.com)",
       "Bash(/Users/edgar/.npm-global/bin/claude-code-acp)",
-      "Bash(mix compile)",
-      "Bash(mix deps.get:*)",
-      "Bash(mix run:*)",
+      "Bash(mix:*)",
       "Bash(find:*)"
     ],
     "deny": [],

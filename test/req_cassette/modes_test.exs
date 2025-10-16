@@ -14,6 +14,7 @@ defmodule ReqCassette.ModesTest do
   end
 
   describe "mode: :replay" do
+    @tag capture_log: true
     test "replays from existing cassette" do
       bypass = Bypass.open()
 
@@ -30,7 +31,7 @@ defmodule ReqCassette.ModesTest do
 
       Bypass.down(bypass)
 
-      # Replay with explicit mode
+      # Replay with explicit mode (server is down but we replay from cassette)
       result =
         with_cassette(
           "replay_mode",
@@ -125,6 +126,7 @@ defmodule ReqCassette.ModesTest do
                2
     end
 
+    @tag capture_log: true
     test "raises error when network is unavailable" do
       assert_raise RuntimeError, ~r/Network request failed/, fn ->
         with_cassette(
@@ -140,6 +142,7 @@ defmodule ReqCassette.ModesTest do
   end
 
   describe "mode: :record_missing (default)" do
+    @tag capture_log: true
     test "records on first call, replays on subsequent calls" do
       bypass = Bypass.open()
 
@@ -160,7 +163,7 @@ defmodule ReqCassette.ModesTest do
       # Take down server
       Bypass.down(bypass)
 
-      # Second call - replays
+      # Second call - replays (server is down but we replay from cassette)
       result2 =
         with_cassette("record_missing", [cassette_dir: @cassette_dir], fn plug ->
           Req.get!("http://localhost:#{bypass.port}/data", plug: plug)
