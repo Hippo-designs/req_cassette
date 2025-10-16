@@ -27,6 +27,19 @@ defmodule ReqCassette.ReqLLMTest do
       model = "anthropic:claude-sonnet-4-20250514"
       prompt = "Make a poem about Elixir"
 
+      # Use named cassette so we can switch modes between calls
+      cassette_opts_record = %{
+        cassette_dir: @cassette_dir,
+        cassette_name: "llm_poem_generation",
+        mode: :record_missing
+      }
+
+      cassette_opts_replay = %{
+        cassette_dir: @cassette_dir,
+        cassette_name: "llm_poem_generation",
+        mode: :replay
+      }
+
       # First request - records to cassette
       {:ok, response1} =
         ReqLLM.generate_text(
@@ -35,7 +48,7 @@ defmodule ReqCassette.ReqLLMTest do
           temperature: 1.0,
           max_tokens: 50,
           req_http_options: [
-            plug: {ReqCassette.Plug, %{cassette_dir: @cassette_dir, mode: :record}}
+            plug: {ReqCassette.Plug, cassette_opts_record}
           ]
         )
 
@@ -48,7 +61,13 @@ defmodule ReqCassette.ReqLLMTest do
       cassettes = File.ls!(@cassette_dir)
       assert length(cassettes) == 1
 
-      # Second request - replays from cassette (no API call)
+      # Verify cassette interactions after first call
+      cassette_path = Path.join(@cassette_dir, "llm_poem_generation.json")
+      {:ok, data} = File.read(cassette_path)
+      {:ok, cassette} = Jason.decode(data)
+      interactions_count = length(cassette["interactions"])
+
+      # Second request - replays from cassette (guaranteed no API call)
       {:ok, response2} =
         ReqLLM.generate_text(
           model,
@@ -56,7 +75,7 @@ defmodule ReqCassette.ReqLLMTest do
           temperature: 1.0,
           max_tokens: 50,
           req_http_options: [
-            plug: {ReqCassette.Plug, %{cassette_dir: @cassette_dir, mode: :replay}}
+            plug: {ReqCassette.Plug, cassette_opts_replay}
           ]
         )
 
@@ -65,9 +84,14 @@ defmodule ReqCassette.ReqLLMTest do
       assert text1 == text2
       assert response1.id == response2.id
 
-      # Verify only one cassette exists (no new recording)
+      # Verify no new cassettes were created (replayed from existing)
       cassettes_after = File.ls!(@cassette_dir)
       assert length(cassettes_after) == 1
+
+      # Verify interaction count unchanged (replay didn't add new interactions)
+      {:ok, data_after} = File.read(cassette_path)
+      {:ok, cassette_after} = Jason.decode(data_after)
+      assert length(cassette_after["interactions"]) == interactions_count
     end
 
     @tag capture_log: true
@@ -110,6 +134,19 @@ defmodule ReqCassette.ReqLLMTest do
       end)
 
       # Make the request through our cassette plug
+      # Use named cassette so we can switch modes between calls
+      cassette_opts_record = %{
+        cassette_dir: @cassette_dir,
+        cassette_name: "mocked_llm_response",
+        mode: :record_missing
+      }
+
+      cassette_opts_replay = %{
+        cassette_dir: @cassette_dir,
+        cassette_name: "mocked_llm_response",
+        mode: :replay
+      }
+
       messages = "Say hello"
 
       result =
@@ -120,7 +157,7 @@ defmodule ReqCassette.ReqLLMTest do
             messages: [%{role: "user", content: messages}],
             max_tokens: 50
           },
-          plug: {ReqCassette.Plug, %{cassette_dir: @cassette_dir, mode: :record}}
+          plug: {ReqCassette.Plug, cassette_opts_record}
         )
 
       assert result.status == 200
@@ -130,13 +167,19 @@ defmodule ReqCassette.ReqLLMTest do
                "Hello from cassette test"
 
       # Verify cassette was created
-      cassettes = File.ls!(@cassette_dir)
-      assert length(cassettes) == 1
+      cassettes_before = File.ls!(@cassette_dir)
+      assert length(cassettes_before) == 1
+
+      # Verify cassette interactions after first call
+      cassette_path = Path.join(@cassette_dir, "mocked_llm_response.json")
+      {:ok, data} = File.read(cassette_path)
+      {:ok, cassette} = Jason.decode(data)
+      interactions_count = length(cassette["interactions"])
 
       # Shut down bypass to ensure replay doesn't hit network
       Bypass.down(bypass)
 
-      # Replay from cassette
+      # Replay from cassette (guaranteed no network hit)
       replay_result =
         Req.post!(
           "http://localhost:#{bypass.port}/v1/messages",
@@ -145,12 +188,21 @@ defmodule ReqCassette.ReqLLMTest do
             messages: [%{role: "user", content: messages}],
             max_tokens: 50
           },
-          plug: {ReqCassette.Plug, %{cassette_dir: @cassette_dir, mode: :replay}}
+          plug: {ReqCassette.Plug, cassette_opts_replay}
         )
 
       # Should get same response from cassette
       assert replay_result.status == 200
       assert replay_result.body == result.body
+
+      # Verify no new cassettes were created (replayed from existing)
+      cassettes_after = File.ls!(@cassette_dir)
+      assert length(cassettes_after) == 1
+
+      # Verify interaction count unchanged (replay didn't add new interactions)
+      {:ok, data_after} = File.read(cassette_path)
+      {:ok, cassette_after} = Jason.decode(data_after)
+      assert length(cassette_after["interactions"]) == interactions_count
     end
   end
 end

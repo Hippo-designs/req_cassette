@@ -243,8 +243,18 @@ defmodule ReqCassette.AgentReplayTest do
     @tag :req_llm
     @tag :capture_log
     test "single prompt with tool should replay correctly" do
-      cassette_opts_record = %{cassette_dir: @cassette_dir, mode: :record_missing}
-      cassette_opts_replay = %{cassette_dir: @cassette_dir, mode: :replay}
+      # Use named cassette so we can switch modes between calls
+      cassette_opts_record = %{
+        cassette_dir: @cassette_dir,
+        cassette_name: "agent_single_prompt",
+        mode: :record_missing
+      }
+
+      cassette_opts_replay = %{
+        cassette_dir: @cassette_dir,
+        cassette_name: "agent_single_prompt",
+        mode: :replay
+      }
 
       Logger.debug("=== FIRST RUN ===")
       {:ok, agent1} = MyAgentWithCassettes.start_link(cassette_opts: cassette_opts_record)
@@ -253,6 +263,13 @@ defmodule ReqCassette.AgentReplayTest do
 
       cassettes_after_first = File.ls!(@cassette_dir)
       Logger.debug("Cassettes after first run: #{length(cassettes_after_first)}")
+
+      # Verify cassette interactions after first call
+      cassette_path = Path.join(@cassette_dir, "agent_single_prompt.json")
+      {:ok, data} = File.read(cassette_path)
+      {:ok, cassette} = Jason.decode(data)
+      interactions_count = length(cassette["interactions"])
+      Logger.debug("Interactions after first run: #{interactions_count}")
 
       Logger.debug("=== SECOND RUN (replay) ===")
       {:ok, agent2} = MyAgentWithCassettes.start_link(cassette_opts: cassette_opts_replay)
@@ -268,13 +285,30 @@ defmodule ReqCassette.AgentReplayTest do
       # Verify no new cassettes were created
       assert length(cassettes_after_second) == length(cassettes_after_first),
              "New cassettes were created on replay. Expected: #{length(cassettes_after_first)}, Got: #{length(cassettes_after_second)}"
+
+      # Verify interaction count unchanged (replay didn't add new interactions)
+      {:ok, data_after} = File.read(cassette_path)
+      {:ok, cassette_after} = Jason.decode(data_after)
+
+      assert length(cassette_after["interactions"]) == interactions_count,
+             "Interactions changed on replay. Expected: #{interactions_count}, Got: #{length(cassette_after["interactions"])}"
     end
 
     @tag :req_llm
     @tag :capture_log
     test "multiple prompts should replay correctly from same agent" do
-      cassette_opts_record = %{cassette_dir: @cassette_dir, mode: :record_missing}
-      cassette_opts_replay = %{cassette_dir: @cassette_dir, mode: :replay}
+      # Use named cassette so we can switch modes between calls
+      cassette_opts_record = %{
+        cassette_dir: @cassette_dir,
+        cassette_name: "agent_multiple_prompts",
+        mode: :record_missing
+      }
+
+      cassette_opts_replay = %{
+        cassette_dir: @cassette_dir,
+        cassette_name: "agent_multiple_prompts",
+        mode: :replay
+      }
 
       Logger.debug("=== FIRST RUN - Multiple prompts ===")
       {:ok, agent1} = MyAgentWithCassettes.start_link(cassette_opts: cassette_opts_record)
@@ -292,6 +326,13 @@ defmodule ReqCassette.AgentReplayTest do
 
       cassettes_after_first = File.ls!(@cassette_dir)
       Logger.debug("Cassettes after first run: #{length(cassettes_after_first)}")
+
+      # Verify cassette interactions after first call
+      cassette_path = Path.join(@cassette_dir, "agent_multiple_prompts.json")
+      {:ok, data} = File.read(cassette_path)
+      {:ok, cassette} = Jason.decode(data)
+      interactions_count = length(cassette["interactions"])
+      Logger.debug("Interactions after first run: #{interactions_count}")
 
       Logger.debug("=== SECOND RUN (replay) - Same prompts ===")
       {:ok, agent2} = MyAgentWithCassettes.start_link(cassette_opts: cassette_opts_replay)
@@ -317,6 +358,13 @@ defmodule ReqCassette.AgentReplayTest do
       # Verify no new cassettes were created
       assert length(cassettes_after_second) == length(cassettes_after_first),
              "New cassettes were created on replay. Expected: #{length(cassettes_after_first)}, Got: #{length(cassettes_after_second)}"
+
+      # Verify interaction count unchanged (replay didn't add new interactions)
+      {:ok, data_after} = File.read(cassette_path)
+      {:ok, cassette_after} = Jason.decode(data_after)
+
+      assert length(cassette_after["interactions"]) == interactions_count,
+             "Interactions changed on replay. Expected: #{interactions_count}, Got: #{length(cassette_after["interactions"])}"
     end
   end
 end
