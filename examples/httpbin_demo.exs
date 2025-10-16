@@ -9,7 +9,7 @@ IO.puts("Making first request to httpbin.org (will record to cassette)...")
 response1 =
   Req.get!(
     "https://httpbin.org/json",
-    plug: {ReqCassette.Plug, %{cassette_dir: cassette_dir, mode: :record}}
+    plug: {ReqCassette.Plug, %{cassette_name: "httpbin_json", cassette_dir: cassette_dir, mode: :record}}
   )
 
 IO.puts("✓ First request completed")
@@ -23,7 +23,7 @@ IO.puts("Making second request (will replay from cassette - no network call)..."
 response2 =
   Req.get!(
     "https://httpbin.org/json",
-    plug: {ReqCassette.Plug, %{cassette_dir: cassette_dir, mode: :record}}
+    plug: {ReqCassette.Plug, %{cassette_name: "httpbin_json", cassette_dir: cassette_dir, mode: :record}}
   )
 
 IO.puts("✓ Second request completed (from cassette)")

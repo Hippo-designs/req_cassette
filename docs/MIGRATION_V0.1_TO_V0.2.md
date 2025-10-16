@@ -45,6 +45,32 @@ end
 - Cleaner test code
 - Explicit plug passing for helper functions
 
+> #### Cassette Naming Best Practice {: .warning}
+>
+> **Always provide a cassette name** as the first argument to `with_cassette/3`.
+> This creates human-readable cassette files that are easy to identify, manage,
+> and understand.
+>
+> **✅ Good** - Human-readable cassette:
+>
+> ```elixir
+> with_cassette "github_user_profile", [cassette_dir: "test/cassettes"], fn plug ->
+>   Req.get!("https://api.github.com/users/wojtekmach", plug: plug)
+> end
+> # Creates: test/cassettes/github_user_profile.json
+> ```
+>
+> **❌ Avoid** - Direct plug usage without cassette name (v0.1 style):
+>
+> ```elixir
+> Req.get!("https://api.example.com/users/1",
+>   plug: {ReqCassette.Plug, %{cassette_dir: "test/cassettes"}})
+> # Creates: test/cassettes/a1b2c3d4e5f6.json (cryptic MD5 hash)
+> ```
+>
+> While direct plug usage still works for backward compatibility, it generates
+> MD5-hashed filenames that are difficult to identify and maintain.
+
 ### 2. Cassette Format: Simple → v1.0 with Interactions
 
 **v0.1.0 Format:**
@@ -609,11 +635,5 @@ If you run into issues:
 - ✅ Sensitive data filtering
 - ✅ Custom request matching
 - ✅ Multiple interactions per cassette
-
-**Migration effort:**
-
-- 🟢 Low: ~15 minutes for simple projects
-- 🟡 Medium: ~30 minutes for projects with helper functions
-- 🔴 High: ~1 hour for complex test suites with custom patterns
 
 The effort is worth it - v0.2 is significantly better for production use!

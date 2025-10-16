@@ -61,13 +61,13 @@ end
 # First call - records to cassette
 response = Req.get!(
   "https://api.example.com/users/1",
-  plug: {ReqCassette.Plug, %{cassette_dir: "test/cassettes", mode: :record}}
+  plug: {ReqCassette.Plug, %{cassette_name: "get_user", cassette_dir: "test/cassettes", mode: :record}}
 )
 
 # Second call - replays from cassette (instant, no network!)
 response = Req.get!(
   "https://api.example.com/users/1",
-  plug: {ReqCassette.Plug, %{cassette_dir: "test/cassettes", mode: :record}}
+  plug: {ReqCassette.Plug, %{cassette_name: "get_user", cassette_dir: "test/cassettes", mode: :record}}
 )
 ```
 
@@ -79,7 +79,7 @@ response = Req.get!(
   "Explain recursion",
   max_tokens: 100,
   req_http_options: [
-    plug: {ReqCassette.Plug, %{cassette_dir: "test/cassettes", mode: :record}}
+    plug: {ReqCassette.Plug, %{cassette_name: "explain_recursion", cassette_dir: "test/cassettes", mode: :record}}
   ]
 )
 # First call costs money, subsequent calls are free!

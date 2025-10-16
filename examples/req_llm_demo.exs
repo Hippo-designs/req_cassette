@@ -37,7 +37,7 @@ IO.puts("📝 Making first request to Anthropic API (will record to cassette)...
   prompt,
   max_tokens: 100,
   req_http_options: [
-    plug: {ReqCassette.Plug, %{cassette_dir: cassette_dir, mode: :record}}
+    plug: {ReqCassette.Plug, %{cassette_name: "llm_intro", cassette_dir: cassette_dir, mode: :record}}
   ]
 )
 
@@ -50,7 +50,7 @@ IO.puts("🎬 Making second request (will replay from cassette - NO API CALL!)..
   prompt,
   max_tokens: 100,
   req_http_options: [
-    plug: {ReqCassette.Plug, %{cassette_dir: cassette_dir, mode: :record}}
+    plug: {ReqCassette.Plug, %{cassette_name: "llm_intro", cassette_dir: cassette_dir, mode: :record}}
   ]
 )
 

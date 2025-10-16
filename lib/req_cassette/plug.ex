@@ -24,10 +24,30 @@ defmodule ReqCassette.Plug do
         }}
       )
 
+  > #### Cassette Naming Best Practice {: .warning}
+  >
+  > Always provide `:cassette_name` for human-readable, maintainable cassette files.
+  >
+  > **Without cassette_name** (not recommended):
+  >
+  >     plug: {ReqCassette.Plug, %{cassette_dir: "test/cassettes"}}
+  >     # Creates: a1b2c3d4e5f6789012345678901234ab.json
+  >     # ❌ Cryptic MD5 hash - hard to identify which test this belongs to
+  >
+  > **With cassette_name** (recommended):
+  >
+  >     plug: {ReqCassette.Plug, %{cassette_name: "github_user", cassette_dir: "test/cassettes"}}
+  >     # Creates: github_user.json
+  >     # ✅ Clear, readable - easy to manage and understand
+  >
+  > The MD5 hash fallback exists for backward compatibility but should be avoided in new code.
+
   ## Options
 
-  - `:cassette_name` - Human-readable name for the cassette file (e.g., `"github_api"`).
-    Creates `github_api.json`. If omitted, generates an MD5 hash filename.
+  - `:cassette_name` - **(Recommended)** Human-readable name for the cassette file (e.g., `"github_api"`).
+    Creates `github_api.json`. If omitted, generates a cryptic MD5 hash filename based on
+    matching options (`:mode`, `:cassette_dir`, and `:cassette_name` are excluded from hash).
+    **Always provide this option for maintainable tests.**
   - `:cassette_dir` - Directory where cassette files are stored (default: `"cassettes"`)
   - `:mode` - Recording mode (default: `:record_missing`). See "Recording Modes" below.
   - `:match_requests_on` - List of criteria for matching requests (default: `[:method, :uri, :query, :headers, :body]`)
@@ -546,7 +566,9 @@ defmodule ReqCassette.Plug do
       case opts[:cassette_name] do
         nil ->
           # Generate MD5 hash (backward compatibility)
-          hash = :crypto.hash(:md5, :erlang.term_to_binary(opts))
+          # Exclude cassette management options from hash - only hash options that affect matching
+          opts_for_hash = Map.drop(opts, [:mode, :cassette_dir, :cassette_name])
+          hash = :crypto.hash(:md5, :erlang.term_to_binary(opts_for_hash))
           Base.encode16(hash, case: :lower) <> ".json"
 
         name ->

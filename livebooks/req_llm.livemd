@@ -123,6 +123,7 @@ defmodule MyAgentWithCassettes do
       # Start the agent with cassette support
       {:ok, agent} = MyAgentWithCassettes.start_link(
         cassette_opts: [
+          cassette_name: "my_agent",
           cassette_dir: "cassettes",
           mode: :record
         ]

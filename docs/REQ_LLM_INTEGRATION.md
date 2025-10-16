@@ -42,7 +42,7 @@ prompt = "Explain recursion in one sentence"
   prompt,
   max_tokens: 100,
   req_http_options: [
-    plug: {ReqCassette.Plug, %{cassette_dir: "test/cassettes", mode: :record}}
+    plug: {ReqCassette.Plug, %{cassette_name: "llm_example", cassette_dir: "test/cassettes", mode: :record}}
   ]
 )
 
@@ -52,7 +52,7 @@ prompt = "Explain recursion in one sentence"
   prompt,
   max_tokens: 100,
   req_http_options: [
-    plug: {ReqCassette.Plug, %{cassette_dir: "test/cassettes", mode: :record}}
+    plug: {ReqCassette.Plug, %{cassette_name: "llm_example", cassette_dir: "test/cassettes", mode: :record}}
   ]
 )
 
@@ -81,7 +81,7 @@ defmodule MyApp.LLMTest do
       "Explain what Elixir's pipe operator does",
       max_tokens: 150,
       req_http_options: [
-        plug: {ReqCassette.Plug, %{cassette_dir: @cassette_dir, mode: :record}}
+        plug: {ReqCassette.Plug, %{cassette_name: "pipe_explanation", cassette_dir: @cassette_dir, mode: :record}}
       ]
     )
 
@@ -145,6 +145,7 @@ The plug options are passed directly in your `Req` call:
 ```elixir
 Req.get(url,
   plug: {ReqCassette.Plug, %{
+    cassette_name: "my_api_call",    # Human-readable cassette name
     cassette_dir: "test/cassettes",  # Where to store cassettes
     mode: :record                     # :record, :all, :once, or :none
   }}
@@ -236,6 +237,7 @@ supports both tool calling and cassette recording/replay:
 # Start agent with cassette support
 {:ok, agent} = MyAgentWithCassettes.start_link(
   cassette_opts: [
+    cassette_name: "my_agent",
     cassette_dir: "agent_cassettes",
     mode: :record
   ]

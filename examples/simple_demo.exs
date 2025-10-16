@@ -17,7 +17,7 @@ IO.puts("Making first request (will record to cassette)...")
 response1 =
   Req.get!(
     "http://localhost:#{bypass.port}/api/users/1",
-    plug: {ReqCassette.Plug, %{cassette_dir: "demo_cassettes", mode: :record}}
+    plug: {ReqCassette.Plug, %{cassette_name: "simple_demo_user", cassette_dir: "demo_cassettes", mode: :record}}
   )
 
 IO.puts("Response 1 status: #{response1.status}")
@@ -34,7 +34,7 @@ IO.puts("Making second request (will replay from cassette)...")
 response2 =
   Req.get!(
     "http://localhost:#{bypass.port}/api/users/1",
-    plug: {ReqCassette.Plug, %{cassette_dir: "demo_cassettes", mode: :record}}
+    plug: {ReqCassette.Plug, %{cassette_name: "simple_demo_user", cassette_dir: "demo_cassettes", mode: :record}}
   )
 
 IO.puts("Response 2 status: #{response2.status}")

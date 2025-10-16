@@ -27,7 +27,9 @@ defmodule ReqCassette.PlugTest do
       response =
         Req.get!(
           "http://localhost:#{bypass.port}/users/1",
-          plug: {ReqCassette.Plug, %{cassette_dir: @cassette_dir}}
+          plug:
+            {ReqCassette.Plug,
+             %{cassette_name: "simple_get_request", cassette_dir: @cassette_dir}}
         )
 
       assert response.status == 200
@@ -52,7 +54,9 @@ defmodule ReqCassette.PlugTest do
       _first_response =
         Req.get!(
           "http://localhost:#{bypass.port}/users/2",
-          plug: {ReqCassette.Plug, %{cassette_dir: @cassette_dir}}
+          plug:
+            {ReqCassette.Plug,
+             %{cassette_name: "replay_without_network", cassette_dir: @cassette_dir}}
         )
 
       # Take down the bypass server to ensure we're not hitting the network
@@ -62,7 +66,9 @@ defmodule ReqCassette.PlugTest do
       replay_response =
         Req.get!(
           "http://localhost:#{bypass.port}/users/2",
-          plug: {ReqCassette.Plug, %{cassette_dir: @cassette_dir}}
+          plug:
+            {ReqCassette.Plug,
+             %{cassette_name: "replay_without_network", cassette_dir: @cassette_dir}}
         )
 
       assert replay_response.status == 200
@@ -89,7 +95,8 @@ defmodule ReqCassette.PlugTest do
         Req.post!(
           "http://localhost:#{bypass.port}/users",
           json: %{name: "Charlie", email: "charlie@example.com"},
-          plug: {ReqCassette.Plug, %{cassette_dir: @cassette_dir}}
+          plug:
+            {ReqCassette.Plug, %{cassette_name: "post_with_body", cassette_dir: @cassette_dir}}
         )
 
       assert response.status == 201
@@ -114,7 +121,9 @@ defmodule ReqCassette.PlugTest do
         Req.post!(
           "http://localhost:#{bypass.port}/api",
           json: %{prompt: "Hello"},
-          plug: {ReqCassette.Plug, %{cassette_dir: @cassette_dir}}
+          plug:
+            {ReqCassette.Plug,
+             %{cassette_name: "multiple_interactions", cassette_dir: @cassette_dir}}
         )
 
       # Second request with prompt "Goodbye"
@@ -122,7 +131,9 @@ defmodule ReqCassette.PlugTest do
         Req.post!(
           "http://localhost:#{bypass.port}/api",
           json: %{prompt: "Goodbye"},
-          plug: {ReqCassette.Plug, %{cassette_dir: @cassette_dir}}
+          plug:
+            {ReqCassette.Plug,
+             %{cassette_name: "multiple_interactions", cassette_dir: @cassette_dir}}
         )
 
       # In v0.2, both interactions are stored in ONE cassette file
@@ -144,14 +155,18 @@ defmodule ReqCassette.PlugTest do
         Req.post!(
           "http://localhost:#{bypass.port}/api",
           json: %{prompt: "Hello"},
-          plug: {ReqCassette.Plug, %{cassette_dir: @cassette_dir}}
+          plug:
+            {ReqCassette.Plug,
+             %{cassette_name: "multiple_interactions", cassette_dir: @cassette_dir}}
         )
 
       replay2 =
         Req.post!(
           "http://localhost:#{bypass.port}/api",
           json: %{prompt: "Goodbye"},
-          plug: {ReqCassette.Plug, %{cassette_dir: @cassette_dir}}
+          plug:
+            {ReqCassette.Plug,
+             %{cassette_name: "multiple_interactions", cassette_dir: @cassette_dir}}
         )
 
       assert replay1.body["result"] == "Response to: Hello"
