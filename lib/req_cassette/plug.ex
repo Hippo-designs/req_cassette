@@ -7,96 +7,245 @@ defmodule ReqCassette.Plug do
 
   ## Usage
 
-  Pass the plug to Req using the `:plug` option:
+  The easiest way to use this plug is via the `ReqCassette.with_cassette/3` function,
+  but it can also be used directly with Req:
 
-      response = Req.get!(
+      # With with_cassette/3 (recommended)
+      ReqCassette.with_cassette("my_api_call", [cassette_dir: "test/cassettes"], fn plug ->
+        Req.get!("https://api.example.com/data", plug: plug)
+      end)
+
+      # Direct usage
+      Req.get!(
         "https://api.example.com/data",
-        plug: {ReqCassette.Plug, %{cassette_dir: "test/cassettes"}}
+        plug: {ReqCassette.Plug, %{
+          cassette_name: "my_api_call",
+          cassette_dir: "test/cassettes"
+        }}
       )
 
   ## Options
 
+  - `:cassette_name` - Human-readable name for the cassette file (e.g., `"github_api"`).
+    Creates `github_api.json`. If omitted, generates an MD5 hash filename.
   - `:cassette_dir` - Directory where cassette files are stored (default: `"cassettes"`)
-  - `:mode` - Recording mode (currently only `:record` is supported, default: `:record`)
+  - `:mode` - Recording mode (default: `:record_missing`). See "Recording Modes" below.
+  - `:match_requests_on` - List of criteria for matching requests (default: `[:method, :uri, :query, :headers, :body]`)
+  - `:filter_sensitive_data` - List of `{regex, replacement}` tuples to filter sensitive data
+  - `:filter_request_headers` - List of request header names to remove (case-insensitive)
+  - `:filter_response_headers` - List of response header names to remove (case-insensitive)
+  - `:before_record` - Callback function for custom filtering (receives and returns interaction map)
 
-  ## Cassette Matching
+  ## Recording Modes
 
-  Cassettes are matched by creating an MD5 hash of:
+  ReqCassette supports four recording modes that control when cassettes are created/used:
 
-  - HTTP method (e.g., `GET`, `POST`)
-  - Request path
-  - Query string
-  - Request body
+  ### `:record_missing` (default)
 
-  This ensures that different requests create different cassettes, and identical
-  requests replay from the same cassette.
+  Records new interactions, replays existing ones. Ideal for development:
+
+      # First run: records interaction to cassette
+      ReqCassette.with_cassette("api", [], fn plug ->
+        Req.get!("https://api.example.com/data", plug: plug)
+      end)
+
+      # Subsequent runs: replays from cassette (no network call)
+
+  ### `:replay`
+
+  Only replays from cassettes. Raises error if cassette or matching interaction not found.
+  Perfect for CI environments to ensure no unexpected network calls:
+
+      ReqCassette.with_cassette("api", [mode: :replay], fn plug ->
+        Req.get!("https://api.example.com/data", plug: plug)
+        # Raises if cassette doesn't exist or no matching interaction
+      end)
+
+  ### `:record`
+
+  Always hits the network and overwrites the cassette. Useful for refreshing cassettes:
+
+      ReqCassette.with_cassette("api", [mode: :record], fn plug ->
+        Req.get!("https://api.example.com/data", plug: plug)
+        # Always hits network, replaces entire cassette
+      end)
+
+  ### `:bypass`
+
+  Ignores cassettes completely, always hits the network. Never saves. Useful for
+  debugging or selectively disabling cassettes:
+
+      ReqCassette.with_cassette("api", [mode: :bypass], fn plug ->
+        Req.get!("https://api.example.com/data", plug: plug)
+        # Always hits network, never creates cassette
+      end)
+
+  ## Request Matching
+
+  By default, requests are matched on all criteria (method, URI, query, headers, body).
+  You can customize this with `:match_requests_on`:
+
+      # Only match on method and URI (ignore query params and body)
+      ReqCassette.with_cassette(
+        "search",
+        [match_requests_on: [:method, :uri]],
+        fn plug ->
+          Req.get!("https://api.example.com/search?q=foo", plug: plug)
+          # Later: ?q=bar will replay the same response
+        end
+      )
+
+  Available matchers:
+  - `:method` - HTTP method (GET, POST, etc.)
+  - `:uri` - Path without query string
+  - `:query` - Query parameters (order-independent)
+  - `:headers` - Request headers (case-insensitive)
+  - `:body` - Request body (JSON key order-independent)
 
   ## Cassette File Format
 
-  Cassettes are stored as JSON files with the following structure:
+  Cassettes use v1.0 format with pretty-printed JSON and multiple interactions:
 
       {
-        "status": 200,
-        "headers": {
-          "content-type": ["application/json"],
-          "cache-control": ["max-age=0"]
-        },
-        "body": "{\\"key\\":\\"value\\"}"
+        "version": "1.0",
+        "interactions": [
+          {
+            "request": {
+              "method": "GET",
+              "uri": "/api/users/1",
+              "query_string": "",
+              "headers": {
+                "accept": ["application/json"]
+              },
+              "body": ""
+            },
+            "response": {
+              "status": 200,
+              "headers": {
+                "content-type": ["application/json"]
+              },
+              "body_json": {
+                "id": 1,
+                "name": "Alice"
+              }
+            },
+            "recorded_at": "2025-10-16T12:00:00Z"
+          }
+        ]
       }
 
-  The body is stored as a string. When replaying, the `content-type` header tells
-  Req how to decode it (e.g., JSON responses are automatically parsed).
+  ### Body Types
+
+  Responses are stored in one of three formats based on content type:
+
+  - `body_json` - JSON responses stored as native objects (pretty-printed)
+  - `body` - Text responses (HTML, XML, CSV) stored as strings
+  - `body_blob` - Binary data (images, PDFs) stored as base64
+
+  This approach produces compact, human-readable cassette files.
 
   ## Examples
 
-      # Basic usage
-      Req.get!(
-        "https://api.example.com/users/1",
-        plug: {ReqCassette.Plug, %{cassette_dir: "test/cassettes"}}
+      # Basic GET request with human-readable filename
+      ReqCassette.with_cassette("github_user", [], fn plug ->
+        Req.get!("https://api.github.com/users/octocat", plug: plug)
+      end)
+      # Creates: test/cassettes/github_user.json
+
+      # POST with custom matching (ignore request body)
+      ReqCassette.with_cassette(
+        "create_user",
+        [match_requests_on: [:method, :uri]],
+        fn plug ->
+          Req.post!(
+            "https://api.example.com/users",
+            json: %{name: "Alice"},
+            plug: plug
+          )
+        end
       )
 
-      # POST request with body
-      Req.post!(
-        "https://api.example.com/users",
-        json: %{name: "Alice"},
-        plug: {ReqCassette.Plug, %{cassette_dir: "test/cassettes"}}
+      # Filter sensitive data with regex
+      ReqCassette.with_cassette(
+        "authenticated",
+        [
+          filter_sensitive_data: [
+            {~r/api_key=[\\w-]+/, "api_key=<REDACTED>"}
+          ],
+          filter_request_headers: ["authorization"]
+        ],
+        fn plug ->
+          Req.get!(
+            "https://api.example.com/data?api_key=secret",
+            headers: [{"authorization", "Bearer token"}],
+            plug: plug
+          )
+        end
       )
 
-      # With ReqLLM
-      ReqLLM.generate_text(
-        "anthropic:claude-sonnet-4-20250514",
-        "Hello!",
-        req_http_options: [
-          plug: {ReqCassette.Plug, %{cassette_dir: "test/cassettes"}}
-        ]
+      # Multiple requests in one cassette
+      ReqCassette.with_cassette("workflow", [], fn plug ->
+        user = Req.get!("https://api.example.com/user", plug: plug)
+        posts = Req.get!("https://api.example.com/posts", plug: plug)
+        {user, posts}
+      end)
+      # Single cassette file contains both interactions
+
+      # Custom filtering with callback
+      ReqCassette.with_cassette(
+        "custom_filter",
+        [
+          before_record: fn interaction ->
+            put_in(interaction, ["response", "body_json", "email"], "redacted@example.com")
+          end
+        ],
+        fn plug ->
+          Req.get!("https://api.example.com/profile", plug: plug)
+        end
       )
-
-  ## How It Works
-
-  1. **First Request (Recording)**:
-     - Intercepts the outgoing request
-     - Checks if a matching cassette exists
-     - If not found, forwards the request to the real server
-     - Saves the response to a cassette file
-     - Returns the response
-
-  2. **Subsequent Requests (Replay)**:
-     - Intercepts the outgoing request
-     - Finds the matching cassette file
-     - Loads and returns the saved response
-     - No network call is made
 
   ## Architecture
 
-  This plug uses Req's native testing infrastructure (`Req.Test`), which means:
+  This plug uses Req's native plug system, which provides:
 
   - ✅ **Async-safe**: Works with `async: true` in ExUnit
-  - ✅ **Process-isolated**: No global state
+  - ✅ **Process-isolated**: No global state or process dictionary
   - ✅ **Adapter-agnostic**: Works with any Req adapter (Finch, etc.)
   - ✅ **No mocking**: Uses stable, public APIs
 
-  Unlike ExVCR which uses `:meck` for global module patching, ReqCassette
-  leverages Req's built-in plug system for clean, isolated testing.
+  ## How It Works
+
+  1. **Recording Flow** (`:record` or `:record_missing` mode):
+     - Intercepts the outgoing Req request via the plug callback
+     - Checks if a matching cassette/interaction exists
+     - If not found, forwards the request to the real server
+     - Applies filters to remove sensitive data
+     - Saves the response to a cassette file (pretty-printed JSON)
+     - Returns the response to the caller
+
+  2. **Replay Flow** (`:replay` or `:record_missing` with existing cassette):
+     - Intercepts the outgoing request
+     - Finds the matching cassette file by name
+     - Searches for a matching interaction using configured matchers
+     - Loads and returns the saved response
+     - No network call is made
+
+  3. **Bypass Flow** (`:bypass` mode):
+     - Forwards request directly to the network
+     - Never reads or writes cassettes
+     - Useful for debugging or selectively disabling recording
+
+  ## Integration with ReqLLM
+
+  Works seamlessly with ReqLLM for testing LLM integrations:
+
+      ReqCassette.with_cassette("claude_chat", [], fn plug ->
+        ReqLLM.chat(
+          "anthropic:claude-sonnet-4-20250514",
+          [%{role: "user", content: "Hello!"}],
+          req_http_options: [plug: plug]
+        )
+      end)
   """
   @behaviour Plug
 
@@ -109,19 +258,28 @@ defmodule ReqCassette.Plug do
   Options for configuring the cassette plug.
 
   - `:cassette_dir` - Directory where cassette files are stored
-  - `:mode` - Recording mode (currently only `:record` is supported)
+  - `:cassette_name` - Human-readable name for the cassette file
+  - `:mode` - Recording mode (`:replay`, `:record`, `:record_missing`, `:bypass`)
+  - `:match_requests_on` - List of matchers for finding interactions
   """
   @type opts :: %{
+          optional(:cassette_name) => String.t(),
           cassette_dir: String.t(),
-          mode: :record
+          mode: :replay | :record | :record_missing | :bypass,
+          match_requests_on: [atom()]
         }
 
-  @default_opts %{cassette_dir: "cassettes", mode: :record}
+  @default_opts %{
+    cassette_dir: "cassettes",
+    mode: :record_missing,
+    match_requests_on: [:method, :uri, :query, :headers, :body]
+  }
 
   @doc """
   Initializes the plug with the given options.
 
-  Merges the provided options with the default options.
+  This callback is invoked by Req when the plug is first used. It merges the provided
+  options with default values to create the final configuration.
 
   ## Parameters
 
@@ -129,7 +287,39 @@ defmodule ReqCassette.Plug do
 
   ## Returns
 
-  The merged options map.
+  The merged options map with defaults applied.
+
+  ## Default Options
+
+  - `cassette_dir: "cassettes"` - Directory for storing cassette files
+  - `mode: :record_missing` - Record new interactions, replay existing ones
+  - `match_requests_on: [:method, :uri, :query, :headers, :body]` - Match on all criteria
+
+  ## Examples
+
+      # Minimal options (uses defaults)
+      opts = %{cassette_name: "my_api"}
+      ReqCassette.Plug.init(opts)
+      #=> %{
+      #     cassette_name: "my_api",
+      #     cassette_dir: "cassettes",
+      #     mode: :record_missing,
+      #     match_requests_on: [:method, :uri, :query, :headers, :body]
+      #   }
+
+      # Custom options override defaults
+      opts = %{
+        cassette_name: "my_api",
+        mode: :replay,
+        match_requests_on: [:method, :uri]
+      }
+      ReqCassette.Plug.init(opts)
+      #=> %{
+      #     cassette_name: "my_api",
+      #     cassette_dir: "cassettes",
+      #     mode: :replay,
+      #     match_requests_on: [:method, :uri]
+      #   }
   """
   @spec init(opts() | map()) :: opts()
   def init(opts) do
@@ -139,11 +329,13 @@ defmodule ReqCassette.Plug do
   @doc """
   Handles an incoming HTTP request by either replaying from cassette or recording.
 
-  This is the main entry point for the plug. It:
+  This is the main entry point for the plug, called by Req for each HTTP request.
+  The behavior depends on the configured mode:
 
-  1. Checks if a cassette exists for this request
-  2. If yes, loads and replays the response
-  3. If no, forwards the request to the real server, records the response, and returns it
+  - **`:record_missing`** (default) - Checks for matching interaction, records if not found
+  - **`:replay`** - Only uses cassettes, raises error if not found
+  - **`:record`** - Always hits network and overwrites cassette
+  - **`:bypass`** - Ignores cassettes, always uses network
 
   ## Parameters
 
@@ -152,7 +344,76 @@ defmodule ReqCassette.Plug do
 
   ## Returns
 
-  A `Plug.Conn` struct with the response set.
+  A `Plug.Conn` struct with the response set and halted.
+
+  ## Request Matching
+
+  When looking for a matching interaction in an existing cassette, the plug uses
+  the matchers specified in `:match_requests_on`. For example:
+
+  - `[:method, :uri]` - Match only method and path (ignore query params and body)
+  - `[:method, :uri, :query]` - Match method, path, and query params
+  - `[:method, :uri, :query, :headers, :body]` - Match everything (default)
+
+  Query parameters and JSON body keys are normalized (order-independent) to ensure
+  consistent matching.
+
+  ## Filtering
+
+  Before recording, the plug applies filters in this order:
+
+  1. **Regex filters** (`:filter_sensitive_data`) - Applied to URI, query string, and bodies
+  2. **Header filters** (`:filter_request_headers`, `:filter_response_headers`) - Removes specified headers
+  3. **Callback filter** (`:before_record`) - Custom transformation function
+
+  ## Examples
+
+      # Direct plug usage with replay mode (CI environment)
+      plug_opts = %{
+        cassette_name: "github_api",
+        cassette_dir: "test/cassettes",
+        mode: :replay
+      }
+
+      conn = %Plug.Conn{
+        method: "GET",
+        request_path: "/users/octocat",
+        # ... other fields
+      }
+
+      # Raises if cassette doesn't exist
+      conn = ReqCassette.Plug.call(conn, plug_opts)
+
+      # With custom matching (ignore body differences)
+      plug_opts = %{
+        cassette_name: "api_call",
+        match_requests_on: [:method, :uri, :query]
+      }
+
+      conn = ReqCassette.Plug.call(conn, plug_opts)
+      # POST requests with different bodies will match the same interaction
+
+      # With filtering
+      plug_opts = %{
+        cassette_name: "auth_api",
+        filter_sensitive_data: [
+          {~r/api_key=[\\w-]+/, "api_key=<REDACTED>"}
+        ],
+        filter_request_headers: ["authorization"]
+      }
+
+      conn = ReqCassette.Plug.call(conn, plug_opts)
+      # API keys in query string are redacted, authorization headers removed
+
+  ## Errors
+
+  This function raises in the following cases:
+
+  - **Mode `:replay`** with missing cassette
+  - **Mode `:replay`** with no matching interaction
+  - **Mode `:record` or `:record_missing`** when network request fails
+
+  The error messages include context to help debug the issue.
   """
   @spec call(Conn.t(), opts()) :: Conn.t()
   def call(conn, opts) do
@@ -160,88 +421,166 @@ defmodule ReqCassette.Plug do
     conn = Conn.fetch_query_params(conn)
     {:ok, body, conn} = Conn.read_body(conn)
 
-    key = cassette_key(conn, body, opts)
+    # Handle different recording modes
+    case opts.mode do
+      :bypass ->
+        # Bypass mode - ignore cassettes, always hit network
+        {conn, resp_or_error} = forward_and_capture(conn, body, opts)
+        resp = normalize_response(resp_or_error)
+        resp_to_conn(conn, resp)
 
-    case maybe_load_cassette(key, opts) do
-      {:ok, %{status: status, headers: headers, body: response_body}} ->
-        conn
-        |> put_resp_headers(headers)
-        |> send_resp(status, serialize_body(response_body))
-        |> Conn.halt()
+      :replay ->
+        # Replay mode - only use cassettes, error if missing
+        handle_replay(conn, body, opts)
+
+      :record ->
+        # Record mode - always hit network and overwrite cassette
+        handle_record(conn, body, opts)
+
+      :record_missing ->
+        # Record missing mode - use cassette if exists, otherwise record
+        handle_record_missing(conn, body, opts)
+    end
+  end
+
+  # Mode handlers
+
+  defp handle_replay(conn, body, opts) do
+    path = cassette_path(opts)
+
+    case ReqCassette.Cassette.load(path) do
+      {:ok, cassette} ->
+        match_on = opts[:match_requests_on] || [:method, :uri, :query, :headers, :body]
+
+        case ReqCassette.Cassette.find_interaction(cassette, conn, body, match_on) do
+          {:ok, response} ->
+            conn
+            |> put_resp_headers(response["headers"])
+            |> send_resp(response["status"], ReqCassette.BodyType.decode(response))
+            |> Conn.halt()
+
+          :not_found ->
+            raise """
+            ReqCassette: No matching interaction found in cassette #{path}
+
+            Request: #{conn.method} #{conn.request_path}
+            Matching on: #{inspect(match_on)}
+
+            This cassette exists but doesn't contain a matching interaction.
+            Either add the interaction to the cassette or use mode: :record_missing.
+            """
+        end
 
       :not_found ->
+        raise """
+        ReqCassette: Cassette not found: #{path}
+
+        Mode is :replay which requires an existing cassette.
+        Either create the cassette or use mode: :record_missing.
+        """
+    end
+  end
+
+  defp handle_record(conn, body, opts) do
+    # Always hit network and save to cassette
+    {conn, resp_or_error} = forward_and_capture(conn, body, opts)
+    resp = normalize_response(resp_or_error)
+
+    # Create new cassette or overwrite existing
+    cassette = ReqCassette.Cassette.new()
+    cassette = ReqCassette.Cassette.add_interaction(cassette, conn, body, resp, opts)
+
+    path = cassette_path(opts)
+    ReqCassette.Cassette.save(path, cassette)
+
+    resp_to_conn(conn, resp)
+  end
+
+  defp handle_record_missing(conn, body, opts) do
+    path = cassette_path(opts)
+
+    case ReqCassette.Cassette.load(path) do
+      {:ok, cassette} ->
+        # Cassette exists - try to find matching interaction
+        match_on = opts[:match_requests_on] || [:method, :uri, :query, :headers, :body]
+
+        case ReqCassette.Cassette.find_interaction(cassette, conn, body, match_on) do
+          {:ok, response} ->
+            # Found matching interaction - replay it
+            conn
+            |> put_resp_headers(response["headers"])
+            |> send_resp(response["status"], ReqCassette.BodyType.decode(response))
+            |> Conn.halt()
+
+          :not_found ->
+            # No matching interaction - record new one
+            {conn, resp_or_error} = forward_and_capture(conn, body, opts)
+            resp = normalize_response(resp_or_error)
+
+            # Add new interaction to existing cassette
+            cassette = ReqCassette.Cassette.add_interaction(cassette, conn, body, resp, opts)
+            ReqCassette.Cassette.save(path, cassette)
+
+            resp_to_conn(conn, resp)
+        end
+
+      :not_found ->
+        # Cassette doesn't exist - record new one
         {conn, resp_or_error} = forward_and_capture(conn, body, opts)
+        resp = normalize_response(resp_or_error)
 
-        resp =
-          case resp_or_error do
-            {:ok, %Req.Response{} = r} ->
-              r
+        cassette = ReqCassette.Cassette.new()
+        cassette = ReqCassette.Cassette.add_interaction(cassette, conn, body, resp, opts)
+        ReqCassette.Cassette.save(path, cassette)
 
-            %Req.Response{} = r ->
-              r
-
-            other ->
-              # maybe treat errors differently, or raise
-              raise "unexpected response format: #{inspect(other)}"
-          end
-
-        save_cassette(key, resp, opts)
         resp_to_conn(conn, resp)
     end
   end
 
-  defp cassette_key(conn, body, _opts) do
-    method = conn.method
-    path = conn.request_path
-    qs = conn.query_string
-    # Include body in the hash to ensure different request bodies create different cassettes
-    str = "#{method} #{path}?#{qs}#{body}"
-    # or :sha256, etc.
-    hash = :crypto.hash(:md5, str)
-    Base.encode16(hash, case: :lower)
-  end
+  defp cassette_path(opts) do
+    dir = opts.cassette_dir || opts[:cassette_dir] || "cassettes"
 
-  defp cassette_path(key, opts) do
-    dir = opts.cassette_dir
-    Path.join(dir, key <> ".json")
-  end
+    filename =
+      case opts[:cassette_name] do
+        nil ->
+          # Generate MD5 hash (backward compatibility)
+          hash = :crypto.hash(:md5, :erlang.term_to_binary(opts))
+          Base.encode16(hash, case: :lower) <> ".json"
 
-  defp save_cassette(key, %Req.Response{status: status, headers: headers, body: body}, opts) do
-    path = cassette_path(key, opts)
-    File.mkdir_p!(Path.dirname(path))
-
-    body_str =
-      cond do
-        is_binary(body) ->
-          body
-
-        true ->
-          Jason.encode!(body)
+        name ->
+          # Use human-readable name
+          sanitize_filename(name) <> ".json"
       end
 
-    map = %{
-      "status" => status,
-      "headers" => headers,
-      "body" => body_str
-    }
-
-    File.write!(path, Jason.encode!(map))
+    Path.join(dir, filename)
   end
 
-  defp maybe_load_cassette(key, opts) do
-    path = cassette_path(key, opts)
+  defp sanitize_filename(name) do
+    name
+    |> String.replace(~r/[^\w\s\-\/]/, "_")
+    |> String.replace(~r/\s+/, "_")
+  end
 
-    if File.exists?(path) do
-      with {:ok, data} <- File.read(path),
-           {:ok, %{"status" => status, "headers" => hdrs, "body" => body_str}} <-
-             Jason.decode(data) do
-        # Keep body as string - Req will decode it based on content-type header
-        {:ok, %{status: status, headers: hdrs, body: body_str}}
-      else
-        _ -> :not_found
-      end
-    else
-      :not_found
+  defp normalize_response(resp_or_error) do
+    case resp_or_error do
+      {:ok, %Req.Response{} = r} ->
+        r
+
+      %Req.Response{} = r ->
+        r
+
+      {:error, error} ->
+        raise """
+        ReqCassette: Network request failed
+
+        Error: #{inspect(error)}
+
+        This error occurred while trying to record a cassette. Make sure the server is running
+        or use mode: :replay to use existing cassettes without hitting the network.
+        """
+
+      other ->
+        raise "unexpected response format: #{inspect(other)}"
     end
   end
 

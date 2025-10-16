@@ -82,10 +82,24 @@ defmodule ReqCassette.MixProject do
     [
       main: "ReqCassette",
       extras: [
+        "docs/MIGRATION_V0.1_TO_V0.2.md": [title: "Migration Guide (v0.1 → v0.2)"],
         "docs/REQ_LLM_INTEGRATION.md": [title: "ReqLLM Integration Guide"]
       ],
-      source_ref: "v0.1.0",
-      formatters: ["html"]
+      source_ref: "v0.2.0",
+      formatters: ["html"],
+      groups_for_modules: [
+        Core: [
+          ReqCassette,
+          ReqCassette.Plug
+        ],
+        "Cassette Format": [
+          ReqCassette.Cassette,
+          ReqCassette.BodyType
+        ],
+        Filtering: [
+          ReqCassette.Filter
+        ]
+      ]
     ]
   end
 end
