@@ -56,7 +56,7 @@ defmodule ReqCassette.ReqLLMTest do
           temperature: 1.0,
           max_tokens: 50,
           req_http_options: [
-            plug: {ReqCassette.Plug, %{cassette_dir: @cassette_dir, mode: :record}}
+            plug: {ReqCassette.Plug, %{cassette_dir: @cassette_dir, mode: :replay}}
           ]
         )
 
@@ -70,6 +70,7 @@ defmodule ReqCassette.ReqLLMTest do
       assert length(cassettes_after) == 1
     end
 
+    @tag capture_log: true
     test "works with mocked LLM response" do
       # This test uses Bypass to mock the LLM API, so no real API key needed
       bypass = Bypass.open()
@@ -144,7 +145,7 @@ defmodule ReqCassette.ReqLLMTest do
             messages: [%{role: "user", content: messages}],
             max_tokens: 50
           },
-          plug: {ReqCassette.Plug, %{cassette_dir: @cassette_dir, mode: :record}}
+          plug: {ReqCassette.Plug, %{cassette_dir: @cassette_dir, mode: :replay}}
         )
 
       # Should get same response from cassette

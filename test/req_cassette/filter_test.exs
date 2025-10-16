@@ -362,4 +362,53 @@ defmodule ReqCassette.FilterTest do
                "filtered"
     end
   end
+
+  describe "binary body filtering" do
+    test "filters blob bodies with regex patterns" do
+      bypass = Bypass.open()
+
+      # Create binary data with a "secret" pattern
+      binary_data = "Binary data with secret_pattern_12345 embedded inside"
+
+      Bypass.expect_once(bypass, "GET", "/image", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("image/png")
+        |> Conn.resp(200, binary_data)
+      end)
+
+      # Record with filter on binary body
+      with_cassette(
+        "blob_filter",
+        [
+          cassette_dir: @cassette_dir,
+          filter_sensitive_data: [
+            {~r/secret_pattern_\d+/, "REDACTED"}
+          ]
+        ],
+        fn plug ->
+          Req.get!("http://localhost:#{bypass.port}/image", plug: plug)
+        end
+      )
+
+      # Verify the blob was decoded, filtered, and re-encoded correctly
+      cassette_path = Path.join(@cassette_dir, "blob_filter.json")
+      {:ok, data} = File.read(cassette_path)
+      {:ok, cassette} = Jason.decode(data)
+
+      interaction = hd(cassette["interactions"])
+      response = interaction["response"]
+
+      # Should be stored as blob
+      assert response["body_type"] == "blob"
+      assert response["body_blob"]
+
+      # Decode the blob and verify the filter was applied
+      decoded_blob = Base.decode64!(response["body_blob"])
+      assert decoded_blob =~ "REDACTED"
+      refute decoded_blob =~ "secret_pattern_12345"
+      # Ensure the rest of the data is intact
+      assert decoded_blob =~ "Binary data with"
+      assert decoded_blob =~ "embedded inside"
+    end
+  end
 end

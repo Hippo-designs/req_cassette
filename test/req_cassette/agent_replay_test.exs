@@ -243,10 +243,11 @@ defmodule ReqCassette.AgentReplayTest do
     @tag :req_llm
     @tag :capture_log
     test "single prompt with tool should replay correctly" do
-      cassette_opts = %{cassette_dir: @cassette_dir, mode: :record}
+      cassette_opts_record = %{cassette_dir: @cassette_dir, mode: :record_missing}
+      cassette_opts_replay = %{cassette_dir: @cassette_dir, mode: :replay}
 
       Logger.debug("=== FIRST RUN ===")
-      {:ok, agent1} = MyAgentWithCassettes.start_link(cassette_opts: cassette_opts)
+      {:ok, agent1} = MyAgentWithCassettes.start_link(cassette_opts: cassette_opts_record)
       {:ok, response1} = MyAgentWithCassettes.prompt(agent1, "What is 15 * 7?")
       Logger.debug("First response: #{response1}")
 
@@ -254,7 +255,7 @@ defmodule ReqCassette.AgentReplayTest do
       Logger.debug("Cassettes after first run: #{length(cassettes_after_first)}")
 
       Logger.debug("=== SECOND RUN (replay) ===")
-      {:ok, agent2} = MyAgentWithCassettes.start_link(cassette_opts: cassette_opts)
+      {:ok, agent2} = MyAgentWithCassettes.start_link(cassette_opts: cassette_opts_replay)
       {:ok, response2} = MyAgentWithCassettes.prompt(agent2, "What is 15 * 7?")
       Logger.debug("Second response: #{response2}")
 
@@ -272,10 +273,11 @@ defmodule ReqCassette.AgentReplayTest do
     @tag :req_llm
     @tag :capture_log
     test "multiple prompts should replay correctly from same agent" do
-      cassette_opts = %{cassette_dir: @cassette_dir, mode: :record}
+      cassette_opts_record = %{cassette_dir: @cassette_dir, mode: :record_missing}
+      cassette_opts_replay = %{cassette_dir: @cassette_dir, mode: :replay}
 
       Logger.debug("=== FIRST RUN - Multiple prompts ===")
-      {:ok, agent1} = MyAgentWithCassettes.start_link(cassette_opts: cassette_opts)
+      {:ok, agent1} = MyAgentWithCassettes.start_link(cassette_opts: cassette_opts_record)
 
       {:ok, response1a} = MyAgentWithCassettes.prompt(agent1, "What is 15 * 7?")
       Logger.debug("First prompt response: #{response1a}")
@@ -292,7 +294,7 @@ defmodule ReqCassette.AgentReplayTest do
       Logger.debug("Cassettes after first run: #{length(cassettes_after_first)}")
 
       Logger.debug("=== SECOND RUN (replay) - Same prompts ===")
-      {:ok, agent2} = MyAgentWithCassettes.start_link(cassette_opts: cassette_opts)
+      {:ok, agent2} = MyAgentWithCassettes.start_link(cassette_opts: cassette_opts_replay)
 
       {:ok, response2a} = MyAgentWithCassettes.prompt(agent2, "What is 15 * 7?")
       Logger.debug("First prompt response (replay): #{response2a}")

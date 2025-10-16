@@ -374,4 +374,108 @@ defmodule ReqCassette.MatchingTest do
       assert result.status == 200
     end
   end
+
+  describe "case-insensitive header matching" do
+    @tag capture_log: true
+    test "matches requests with headers in different cases" do
+      bypass = Bypass.open()
+
+      Bypass.expect_once(bypass, "POST", "/api", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{result: "original"}))
+      end)
+
+      # Record with specific header case
+      with_cassette(
+        "header_case",
+        [cassette_dir: @cassette_dir, match_requests_on: [:method, :uri, :headers]],
+        fn plug ->
+          Req.post!(
+            "http://localhost:#{bypass.port}/api",
+            headers: [
+              {"Content-Type", "application/json"},
+              {"Authorization", "Bearer token123"}
+            ],
+            plug: plug
+          )
+        end
+      )
+
+      Bypass.down(bypass)
+
+      # Replay with different header case - should match
+      result =
+        with_cassette(
+          "header_case",
+          [cassette_dir: @cassette_dir, match_requests_on: [:method, :uri, :headers]],
+          fn plug ->
+            Req.post!(
+              "http://localhost:#{bypass.port}/api",
+              headers: [
+                {"content-type", "application/json"},
+                {"authorization", "Bearer token123"}
+              ],
+              plug: plug
+            )
+          end
+        )
+
+      # Should get cassette response (headers matched despite case difference)
+      assert result.status == 200
+      assert result.body["result"] == "original"
+    end
+
+    @tag capture_log: true
+    test "matches requests with headers in different order" do
+      bypass = Bypass.open()
+
+      Bypass.expect_once(bypass, "GET", "/data", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{status: "success"}))
+      end)
+
+      # Record with specific header order
+      with_cassette(
+        "header_order",
+        [cassette_dir: @cassette_dir, match_requests_on: [:method, :uri, :headers]],
+        fn plug ->
+          Req.get!(
+            "http://localhost:#{bypass.port}/data",
+            headers: [
+              {"x-api-key", "key123"},
+              {"x-client-id", "client456"},
+              {"x-request-id", "req789"}
+            ],
+            plug: plug
+          )
+        end
+      )
+
+      Bypass.down(bypass)
+
+      # Replay with different header order - should match
+      result =
+        with_cassette(
+          "header_order",
+          [cassette_dir: @cassette_dir, match_requests_on: [:method, :uri, :headers]],
+          fn plug ->
+            Req.get!(
+              "http://localhost:#{bypass.port}/data",
+              headers: [
+                {"x-request-id", "req789"},
+                {"x-api-key", "key123"},
+                {"x-client-id", "client456"}
+              ],
+              plug: plug
+            )
+          end
+        )
+
+      # Should get cassette response (headers matched despite order difference)
+      assert result.status == 200
+      assert result.body["status"] == "success"
+    end
+  end
 end

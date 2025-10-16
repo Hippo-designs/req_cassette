@@ -559,7 +559,7 @@ defmodule ReqCassette.Plug do
 
   defp sanitize_filename(name) do
     name
-    |> String.replace(~r/[^\w\s\-\/]/, "_")
+    |> String.replace(~r/[^\w\s\-]/, "_")
     |> String.replace(~r/\s+/, "_")
   end
 

@@ -298,4 +298,83 @@ defmodule ReqCassette.WithCassetteTest do
       assert result.body["name"] == "Helper User"
     end
   end
+
+  describe "filename sanitization" do
+    test "sanitizes special characters in cassette names" do
+      bypass = Bypass.open()
+
+      Bypass.expect_once(bypass, "GET", "/api", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{status: "ok"}))
+      end)
+
+      # Use cassette name with special characters
+      with_cassette(
+        "user@example.com/api-call!",
+        [cassette_dir: @cassette_dir],
+        fn plug ->
+          Req.get!("http://localhost:#{bypass.port}/api", plug: plug)
+        end
+      )
+
+      # Verify the cassette was created with sanitized filename
+      cassettes = File.ls!(@cassette_dir)
+      assert length(cassettes) == 1
+      # Special chars should be replaced with underscores (hyphens are preserved)
+      assert "user_example_com_api-call_.json" in cassettes
+    end
+
+    test "sanitizes whitespace in cassette names" do
+      bypass = Bypass.open()
+
+      Bypass.expect_once(bypass, "GET", "/data", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{data: "test"}))
+      end)
+
+      # Use cassette name with multiple spaces
+      with_cassette(
+        "my  test   cassette",
+        [cassette_dir: @cassette_dir],
+        fn plug ->
+          Req.get!("http://localhost:#{bypass.port}/data", plug: plug)
+        end
+      )
+
+      # Verify spaces are collapsed and replaced with underscores
+      cassettes = File.ls!(@cassette_dir)
+      assert length(cassettes) == 1
+      assert "my_test_cassette.json" in cassettes
+    end
+
+    test "handles forward slashes in cassette names" do
+      bypass = Bypass.open()
+
+      Bypass.expect_once(bypass, "GET", "/users", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{users: []}))
+      end)
+
+      # Use cassette name with forward slashes (common in API paths)
+      with_cassette(
+        "api/v1/users",
+        [cassette_dir: @cassette_dir],
+        fn plug ->
+          Req.get!("http://localhost:#{bypass.port}/users", plug: plug)
+        end
+      )
+
+      # Verify slashes are converted (sanitized) and don't create subdirectories
+      cassettes = File.ls!(@cassette_dir)
+      assert length(cassettes) == 1
+      # Forward slash should be replaced with underscore
+      assert "api_v1_users.json" in cassettes
+
+      # Verify no subdirectories were created
+      refute File.dir?(Path.join(@cassette_dir, "api"))
+    end
+  end
 end
