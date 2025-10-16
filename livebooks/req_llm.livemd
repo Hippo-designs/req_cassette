@@ -2,8 +2,7 @@
 
 ```elixir
 Mix.install([
-  # Using upstream fix branch until https://github.com/agentjido/req_llm/issues/93 is closed
-  {:req_llm, github: "lostbean/req_llm", branch: "egomes/fix-claude-multi-turn"},
+  {:req_llm, "~> 1.0.0-rc.7"},
   {:req_cassette, path: Path.join(__DIR__, "..")}
 ])
 ```
@@ -13,7 +12,7 @@ Mix.install([
 ```elixir
 # Set your Anthropic API key
 # System.put_env("ANTHROPIC_API_KEY", "sk-...")
-System.put_env("ANTHROPIC_API_KEY", System.get_env("LB_ANTHROPIC_API_KEY"))
+#System.put_env("ANTHROPIC_API_KEY", System.get_env("LB_ANTHROPIC_API_KEY"))
 ```
 
 ## ReqLLM Basic Usage (without cassettes)
@@ -45,8 +44,10 @@ The following sections demonstrate how to use ReqCassette to record LLM API call
 ### Setup Cassette Directory
 
 ```elixir
-cassette_dir = Path.join(__DIR__, "cassettes")
+cassette_dir = Path.join(__DIR__, "cassettes")  |> dbg
+File.rm_rf!(cassette_dir)
 File.mkdir_p!(cassette_dir)
+File.ls!(cassette_dir)
 ```
 
 ### Using ReqCassette with ReqLLM
@@ -62,7 +63,8 @@ prompt = "Write a short poem about Elixir programming language"
     prompt,
     max_tokens: 100,
     req_http_options: [
-      plug: {ReqCassette.Plug, %{cassette_dir: cassette_dir, mode: :record}}
+      plug:
+        {ReqCassette.Plug, %{cassette_dir: cassette_dir, cassette_name: "test1", mode: :record}}
     ]
   )
 
@@ -78,7 +80,8 @@ IO.puts("First call:\n#{text1}\n")
     prompt,
     max_tokens: 100,
     req_http_options: [
-      plug: {ReqCassette.Plug, %{cassette_dir: cassette_dir, mode: :record}}
+      plug:
+        {ReqCassette.Plug, %{cassette_dir: cassette_dir, cassette_name: "test1", mode: :replay}}
     ]
   )
 
@@ -99,17 +102,6 @@ end
 # List all cassette files
 cassettes = File.ls!(cassette_dir)
 IO.puts("Cassettes created: #{length(cassettes)}")
-
-# Show the content of the first cassette
-if cassettes != [] do
-  first_cassette = Path.join(cassette_dir, List.first(cassettes))
-  cassette_data = File.read!(first_cassette) |> Jason.decode!()
-
-  IO.puts("\nCassette structure:")
-  IO.puts("Status: #{cassette_data["status"]}")
-  IO.puts("Headers: #{length(Map.keys(cassette_data["headers"]))} keys")
-  IO.puts("Body: #{String.slice(cassette_data["body"], 0, 100)}...")
-end
 ```
 
 ## AI Agent with Tool Calling
@@ -149,8 +141,7 @@ defmodule MyAgentWithCassettes do
   """
   use GenServer
 
-  alias ReqLLM.{Context, Tool, Response}
-  alias ReqLLM.Message.ContentPart
+  alias ReqLLM.{Context, Tool, Response, ToolCall}
 
   defstruct [:history, :tools, :model, :req_http_options]
 
@@ -241,11 +232,11 @@ defmodule MyAgentWithCassettes do
           # Tools were called, execute them and make follow-up request
           IO.puts("\n🔧 Executing tools...")
 
-          assistant_message = Context.assistant_with_tools(text, tool_calls)
+          assistant_message = Context.assistant(text, tool_calls: tool_calls)
           history_with_tool_call = Context.append(history, assistant_message)
 
-          # Execute tools and collect results as ContentParts
-          tool_result_parts =
+          # Execute tools and collect results as tool result messages
+          tool_result_messages =
             Enum.map(tool_calls, fn tool_call ->
               tool = Enum.find(tools, fn t -> t.name == tool_call.name end)
 
@@ -256,21 +247,23 @@ defmodule MyAgentWithCassettes do
                       "  #{tool_call.name}(#{inspect(tool_call.arguments)}) → #{inspect(result)}"
                     )
 
-                    ContentPart.tool_result(tool_call.id, result)
+                    result_str = if is_binary(result), do: result, else: Jason.encode!(result)
+                    Context.tool_result(tool_call.id, tool_call.name, result_str)
 
                   {:error, error} ->
                     IO.puts("  ❌ #{tool_call.name}: #{inspect(error)}")
                     error_result = %{error: "Tool execution failed: #{inspect(error)}"}
-                    ContentPart.tool_result(tool_call.id, error_result)
+                    Context.tool_result(tool_call.id, tool_call.name, Jason.encode!(error_result))
                 end
               else
                 IO.puts("  ❌ Tool #{tool_call.name} not found")
-                ContentPart.tool_result(tool_call.id, %{error: "Tool not found"})
+                error_result = %{error: "Tool not found"}
+                Context.tool_result(tool_call.id, tool_call.name, Jason.encode!(error_result))
               end
             end)
 
-          # Append tool results as a user message (required by Anthropic API)
-          history_with_results = Context.append(history_with_tool_call, Context.user(tool_result_parts))
+          # Append tool result messages
+          history_with_results = Context.append(history_with_tool_call, tool_result_messages)
 
           # Make follow-up request with tool results
           IO.puts("\n")
@@ -299,8 +292,20 @@ defmodule MyAgentWithCassettes do
   end
 
   defp extract_tool_calls(%Response{} = response) do
-    # Use ReqLLM's built-in tool_calls function
-    Response.tool_calls(response)
+    # Extract tool calls from the response message
+    case response.message do
+      %{tool_calls: tool_calls} when is_list(tool_calls) and length(tool_calls) > 0 ->
+        Enum.map(tool_calls, fn tool_call ->
+          %{
+            id: tool_call.id,
+            name: ToolCall.name(tool_call),
+            arguments: ToolCall.args_map(tool_call) || %{}
+          }
+        end)
+
+      _ ->
+        []
+    end
   end
 
   defp setup_tools do
@@ -364,11 +369,22 @@ agent_cassettes = File.ls!(agent_cassette_dir)
 IO.puts("Agent cassettes created: #{length(agent_cassettes)}")
 
 # Start agent with cassette support
-{:ok, cassette_agent} =
+{:ok, cassette_agent_1} =
   MyAgentWithCassettes.start_link(
     cassette_opts: [
       cassette_dir: agent_cassette_dir,
-      mode: :record
+      cassette_name: "agent",
+      mode: :record_missing
+    ]
+  )
+
+# Start agent with cassette support
+{:ok, cassette_agent_2} =
+  MyAgentWithCassettes.start_link(
+    cassette_opts: [
+      cassette_dir: agent_cassette_dir,
+      cassette_name: "agent",
+      mode: :record_missing
     ]
   )
 
@@ -377,22 +393,22 @@ IO.puts("✅ Agent started with cassette support (cassettes cleaned)")
 
 ```elixir
 # First call - will record to cassette (costs money)
-MyAgentWithCassettes.prompt(cassette_agent, "What is 15 * 7?")
+MyAgentWithCassettes.prompt(cassette_agent_1, "What is 15 * 7?")
 ```
 
 ```elixir
 # Second identical call - will replay from cassette (FREE!)
-MyAgentWithCassettes.prompt(cassette_agent, "What is 15 * 7?")
+MyAgentWithCassettes.prompt(cassette_agent_2, "What is 15 * 7?")
 ```
 
 ```elixir
 # First call - will record to cassette (costs money)
-MyAgentWithCassettes.prompt(cassette_agent, "Make a joke with the result of 35 - 11?")
+MyAgentWithCassettes.prompt(cassette_agent_1, "Make a joke with the result of 35 - 11?")
 ```
 
 ```elixir
 # Second identical call - will replay from cassette (FREE!)
-MyAgentWithCassettes.prompt(cassette_agent, "Make a joke with the result of 35 - 11?")
+MyAgentWithCassettes.prompt(cassette_agent_2, "Make a joke with the result of 35 - 11?")
 ```
 
 ```elixir
@@ -403,6 +419,8 @@ IO.puts("Agent cassettes created: #{length(agent_cassettes)}")
 # Each tool execution and follow-up creates separate cassettes
 Enum.each(agent_cassettes, fn cassette ->
   IO.puts("  - #{cassette}")
+  cassette_data = File.read!(Path.join(agent_cassette_dir, cassette)) |> Jason.decode!()
+  IO.puts("Number of records is #{length(cassette_data["interactions"])}")
 end)
 ```
 
@@ -523,7 +541,7 @@ defmodule MyAgent do
           tool_calls ->
             initial_text = chunks |> Enum.map_join("", & &1.text)
 
-            assistant_message = Context.assistant_with_tools(initial_text, tool_calls)
+            assistant_message = Context.assistant(initial_text, tool_calls: tool_calls)
             history_with_tool_call = Context.append(history, assistant_message)
 
             # Execute tools and show results
@@ -774,7 +792,7 @@ MyAgent.prompt(agent, "Hello! What can you help me with?")
 
 ```elixir
 MyAgent.prompt(
-  agent, "Calculate what is 123123 + 08083? and what 12341 + 05331?")
+  agent, "Calculate what is 123123 + 08083? and what 12341 + 5331?")
 ```
 
 ```elixir

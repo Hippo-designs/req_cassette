@@ -22,8 +22,7 @@ defmodule ReqCassette.AgentReplayTest do
     """
     use GenServer
 
-    alias ReqLLM.{Context, Tool, Response, Message}
-    alias ReqLLM.Message.ContentPart
+    alias ReqLLM.{Context, Tool, Response, Message, ToolCall}
 
     defstruct [:history, :tools, :model, :req_http_options]
 
@@ -114,17 +113,12 @@ defmodule ReqCassette.AgentReplayTest do
     end
 
     defp handle_tool_calls(model, history, tools, req_http_options, text, tool_calls) do
-      assistant_message = Context.assistant_with_tools(text, tool_calls)
+      assistant_message = Context.assistant(text, tool_calls: tool_calls)
       history_with_tool_call = Context.append(history, assistant_message)
 
-      tool_result_parts = execute_tool_calls(tool_calls, tools)
+      tool_result_messages = execute_tool_calls(tool_calls, tools)
 
-      tool_results_message = %Message{
-        role: :user,
-        content: tool_result_parts
-      }
-
-      history_with_results = Context.append(history_with_tool_call, tool_results_message)
+      history_with_results = Context.append(history_with_tool_call, tool_result_messages)
 
       generate_final_response(model, history_with_results, req_http_options)
     end
@@ -140,16 +134,18 @@ defmodule ReqCassette.AgentReplayTest do
 
       case tool do
         nil ->
-          ContentPart.tool_result(tool_call.id, %{error: "Tool not found"})
+          result = %{error: "Tool not found"}
+          Context.tool_result(tool_call.id, tool_call.name, Jason.encode!(result))
 
         tool ->
           case Tool.execute(tool, tool_call.arguments) do
             {:ok, result} ->
-              ContentPart.tool_result(tool_call.id, result)
+              result_str = if is_binary(result), do: result, else: Jason.encode!(result)
+              Context.tool_result(tool_call.id, tool_call.name, result_str)
 
             {:error, error} ->
               error_result = %{error: "Tool execution failed: #{inspect(error)}"}
-              ContentPart.tool_result(tool_call.id, error_result)
+              Context.tool_result(tool_call.id, tool_call.name, Jason.encode!(error_result))
           end
       end
     end
@@ -173,17 +169,12 @@ defmodule ReqCassette.AgentReplayTest do
 
     defp extract_tool_calls(response) do
       case response.message do
-        %Message{content: content} when is_list(content) ->
-          content
-          |> Enum.filter(fn
-            %{type: :tool_call} -> true
-            _ -> false
-          end)
-          |> Enum.map(fn tool_part ->
+        %Message{tool_calls: tool_calls} when is_list(tool_calls) and length(tool_calls) > 0 ->
+          Enum.map(tool_calls, fn tool_call ->
             %{
-              id: tool_part.tool_call_id,
-              name: tool_part.tool_name,
-              arguments: tool_part.input || %{}
+              id: tool_call.id,
+              name: ToolCall.name(tool_call),
+              arguments: ToolCall.args_map(tool_call) || %{}
             }
           end)
 
