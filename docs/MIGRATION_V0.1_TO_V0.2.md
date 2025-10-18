@@ -163,6 +163,53 @@ test/cassettes/
 
 **No action required** if you want v0.1 behavior (record-if-missing).
 
+### 5. ⚠️ Critical: `:record` Mode Behavior with Multi-Request Tests
+
+The `:record` mode overwrites the cassette file on **each HTTP request**, not
+once at the end of the test. For tests making multiple sequential requests
+(e.g., LLM agents, multi-turn conversations, API workflows), **only the last
+request will be saved** to the cassette.
+
+**Example of Silent Failure:**
+
+```elixir
+# ❌ BROKEN - Only saves the last interaction!
+with_cassette "agent_workflow", [mode: :record], fn plug ->
+  {:ok, agent} = MyAgent.start_link(plug: plug)
+  Agent.prompt(agent, "Turn 1")  # Writes cassette with 1 interaction
+  Agent.prompt(agent, "Turn 2")  # OVERWRITES cassette with 1 interaction
+  Agent.prompt(agent, "Turn 3")  # OVERWRITES cassette with 1 interaction
+end
+# Result: Cassette only contains Turn 3 ❌
+# Switching to mode: :replay will fail with "No matching interaction found"
+```
+
+**The Solution:**
+
+Use `:record_missing` mode instead:
+
+```elixir
+# ✅ CORRECT - Accumulates all interactions
+mode = if System.get_env("RECORD_CASSETTES"), do: :record_missing, else: :replay
+
+with_cassette "agent_workflow", [mode: mode], fn plug ->
+  {:ok, agent} = MyAgent.start_link(plug: plug)
+  Agent.prompt(agent, "Turn 1")  # Cassette: [interaction 1]
+  Agent.prompt(agent, "Turn 2")  # Cassette: [interaction 1, 2]
+  Agent.prompt(agent, "Turn 3")  # Cassette: [interaction 1, 2, 3]
+end
+# Result: All 3 interactions saved ✅
+```
+
+**When to Use Each Mode:**
+
+| Mode              | Use Case                              | Multi-Request Safe?                   |
+| ----------------- | ------------------------------------- | ------------------------------------- |
+| `:record_missing` | **Default for all tests**             | ✅ Yes - accumulates all interactions |
+| `:record`         | Force re-record (single-request only) | ❌ No - overwrites on each request    |
+| `:replay`         | CI/CD, deterministic testing          | ✅ Yes - read-only                    |
+| `:bypass`         | Debugging, temporary disable          | N/A - no cassettes                    |
+
 ## Step-by-Step Migration
 
 ### Step 1: Update Dependency
@@ -471,6 +518,30 @@ end
 **Cause:** Filename changed from MD5 hash to human-readable name.
 
 **Fix:** Re-record cassettes or rename files manually (not recommended).
+
+### Cassette only has 1 interaction but test makes multiple requests
+
+**Symptom:** Tests pass when recording but fail with "No matching interaction
+found" when replaying, even though cassette exists.
+
+**Cause:** Used `:record` mode which overwrites the cassette on each request,
+keeping only the last one.
+
+**Fix:** Switch to `:record_missing` mode:
+
+```elixir
+# Change from:
+with_cassette "test", [mode: :record], fn plug ->
+  # ...
+end
+
+# To:
+with_cassette "test", [mode: :record_missing], fn plug ->
+  # ...
+end
+```
+
+Then delete cassettes and re-record: `rm -rf test/cassettes/*.json && mix test`
 
 ### Tests fail with "No matching interaction found"
 

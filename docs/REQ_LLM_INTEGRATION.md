@@ -42,7 +42,7 @@ prompt = "Explain recursion in one sentence"
   prompt,
   max_tokens: 100,
   req_http_options: [
-    plug: {ReqCassette.Plug, %{cassette_name: "llm_example", cassette_dir: "test/cassettes", mode: :record}}
+    plug: {ReqCassette.Plug, %{cassette_name: "llm_example", cassette_dir: "test/cassettes", mode: :record_missing}}
   ]
 )
 
@@ -52,7 +52,7 @@ prompt = "Explain recursion in one sentence"
   prompt,
   max_tokens: 100,
   req_http_options: [
-    plug: {ReqCassette.Plug, %{cassette_name: "llm_example", cassette_dir: "test/cassettes", mode: :record}}
+    plug: {ReqCassette.Plug, %{cassette_name: "llm_example", cassette_dir: "test/cassettes", mode: :record_missing}}
   ]
 )
 
@@ -81,13 +81,81 @@ defmodule MyApp.LLMTest do
       "Explain what Elixir's pipe operator does",
       max_tokens: 150,
       req_http_options: [
-        plug: {ReqCassette.Plug, %{cassette_name: "pipe_explanation", cassette_dir: @cassette_dir, mode: :record}}
+        plug: {ReqCassette.Plug, %{cassette_name: "pipe_explanation", cassette_dir: @cassette_dir, mode: :record_missing}}
       ]
     )
 
     explanation = ReqLLM.Response.text(response)
     assert explanation =~ ~r/pipe/i
     assert explanation =~ ~r/\|>/
+  end
+end
+```
+
+## ⚠️ Critical for Agents: Recording Mode Selection
+
+**If you're testing LLM agents or multi-turn conversations, you MUST use
+`:record_missing` mode, not `:record` mode.**
+
+### The Problem with `:record` Mode
+
+The `:record` mode overwrites the cassette file on **each HTTP request**, not
+once at the end. For agents making multiple LLM API calls (tool use, multi-turn
+conversations, etc.), **only the last API call will be saved**.
+
+```elixir
+# ❌ BROKEN - Agent test will fail on replay!
+with_cassette "agent_conversation", [mode: :record], fn plug ->
+  {:ok, agent} = MyAgent.start_link(plug: plug)
+
+  # Each call overwrites the cassette
+  Agent.prompt(agent, "Hello")        # Cassette: [API call 1]
+  Agent.prompt(agent, "How are you?") # Cassette: [API call 2] (lost #1!)
+  Agent.prompt(agent, "Goodbye")      # Cassette: [API call 3] (lost #1, #2!)
+end
+# Result: Only the "Goodbye" interaction is saved ❌
+# Replay will fail with "No matching interaction found"
+```
+
+### The Solution: Use `:record_missing`
+
+```elixir
+# ✅ CORRECT - All agent interactions saved
+mode = if System.get_env("RECORD_CASSETTES"), do: :record_missing, else: :replay
+
+with_cassette "agent_conversation", [mode: mode], fn plug ->
+  {:ok, agent} = MyAgent.start_link(plug: plug)
+
+  Agent.prompt(agent, "Hello")        # Cassette: [call 1]
+  Agent.prompt(agent, "How are you?") # Cassette: [call 1, 2]
+  Agent.prompt(agent, "Goodbye")      # Cassette: [call 1, 2, 3]
+end
+# Result: All 3 interactions saved ✅
+```
+
+### Recording Mode Quick Reference
+
+| Mode              | Agent Safe? | Behavior                                     |
+| ----------------- | ----------- | -------------------------------------------- |
+| `:record_missing` | ✅ Yes      | Accumulates all API calls in cassette        |
+| `:record`         | ❌ No       | Overwrites on each request - only saves last |
+| `:replay`         | ✅ Yes      | Read-only replay (perfect for CI)            |
+
+**Best Practice:** Use environment variables to control recording:
+
+```elixir
+setup do
+  mode = case System.get_env("CI") do
+    "true" -> :replay  # CI always replays
+    _ -> if System.get_env("RECORD"), do: :record_missing, else: :replay
+  end
+
+  {:ok, cassette_mode: mode}
+end
+
+test "agent workflow", %{cassette_mode: mode} do
+  with_cassette "agent_test", [mode: mode], fn plug ->
+    # Your agent test here
   end
 end
 ```
@@ -147,21 +215,21 @@ Req.get(url,
   plug: {ReqCassette.Plug, %{
     cassette_name: "my_api_call",    # Human-readable cassette name
     cassette_dir: "test/cassettes",  # Where to store cassettes
-    mode: :record                     # :record, :all, :once, or :none
+    mode: :record_missing            # ✅ Use :record_missing for safety
   }}
 )
 ```
 
 ### Modes
 
-Currently, only `:record` mode is implemented:
+**Available modes:**
 
-- `:record` (default) - Use cassette if exists, otherwise record new one
-
-**Planned for future versions:**
-- `:all` - Always make real API call and overwrite cassette
-- `:once` - Only use existing cassettes, error if cassette missing
-- `:none` - Never record, only replay (good for CI)
+- `:record_missing` (**recommended**) - Records if cassette doesn't exist,
+  replays if it does. Accumulates all interactions safely.
+- `:replay` - Only replay from cassette, error if missing (great for CI)
+- `:record` - Always hit network and overwrite cassette ⚠️ **Overwrites on each
+  request - use only for single-request tests**
+- `:bypass` - Ignore cassettes entirely, always use network
 
 ## Examples
 
@@ -239,7 +307,7 @@ supports both tool calling and cassette recording/replay:
   cassette_opts: [
     cassette_name: "my_agent",
     cassette_dir: "agent_cassettes",
-    mode: :record
+    mode: :record_missing  # ✅ Critical for agents!
   ]
 )
 

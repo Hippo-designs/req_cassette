@@ -5,7 +5,9 @@
 [![GitHub CI](https://github.com/lostbean/req_cassette/workflows/CI/badge.svg)](https://github.com/lostbean/req_cassette/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> **⚠️ Upgrading from v0.1?** See the [Migration Guide](docs/MIGRATION_V0.1_TO_V0.2.md) for breaking changes and upgrade instructions.
+> **⚠️ Upgrading from v0.1?** See the
+> [Migration Guide](docs/MIGRATION_V0.1_TO_V0.2.md) for breaking changes and
+> upgrade instructions.
 
 A VCR-style record-and-replay library for Elixir's [Req](https://hexdocs.pm/req)
 HTTP client. Record HTTP responses to "cassettes" and replay them in tests for
@@ -26,7 +28,8 @@ like Anthropic's Claude!
 - 🎯 **Simple API** - Use `with_cassette` for clean, functional testing
 - 🔒 **Sensitive Data Filtering** - Built-in support for redacting secrets
 - 🎚️ **Multiple Recording Modes** - Flexible control over when to record/replay
-- 📦 **Multiple Interactions** - Store many request/response pairs in one cassette
+- 📦 **Multiple Interactions** - Store many request/response pairs in one
+  cassette
 
 ## Quick Start
 
@@ -42,8 +45,8 @@ test "fetches user data" do
 end
 ```
 
-**First run**: Records to `test/cassettes/github_user.json`
-**Subsequent runs**: Replays instantly from cassette (no network!)
+**First run**: Records to `test/cassettes/github_user.json` **Subsequent runs**:
+Replays instantly from cassette (no network!)
 
 ## Installation
 
@@ -75,10 +78,24 @@ end
 
 ### Recording Modes
 
-Control when to record and replay:
+> **⚠️ Important:** For tests making multiple HTTP requests (agents, multi-turn
+> conversations, workflows), **always use `:record_missing`**. The `:record`
+> mode overwrites the cassette file on **each request**, not at the end of the
+> test, which means only the last request will be saved.
+
+#### Quick Reference
+
+| Mode              | When to Use                                 | Cassette Behavior                                  |
+| ----------------- | ------------------------------------------- | -------------------------------------------------- |
+| `:record_missing` | **Default - use for most tests**            | Records new interactions, skips if cassette exists |
+| `:replay`         | CI/CD, deterministic testing                | Only replays, errors if cassette missing           |
+| `:record`         | Force re-record (single-request tests only) | ⚠️ Overwrites on **each** request                  |
+| `:bypass`         | Debugging, temporary disable                | Ignores cassettes, always hits network             |
+
+#### Examples
 
 ```elixir
-# :record_missing (default) - Record if cassette doesn't exist, otherwise replay
+# ✅ RECOMMENDED: :record_missing (safe for multi-request tests)
 with_cassette "api_call", [mode: :record_missing], fn plug ->
   Req.get!("https://api.example.com/data", plug: plug)
 end
@@ -88,7 +105,8 @@ with_cassette "api_call", [mode: :replay], fn plug ->
   Req.get!("https://api.example.com/data", plug: plug)
 end
 
-# :record - Always hit network and overwrite cassette
+# ⚠️ :record - Always hit network and overwrite cassette
+# WARNING: Only use for single-request tests!
 with_cassette "api_call", [mode: :record], fn plug ->
   Req.get!("https://api.example.com/data", plug: plug)
 end
@@ -98,6 +116,35 @@ with_cassette "api_call", [mode: :bypass], fn plug ->
   Req.get!("https://api.example.com/data", plug: plug)
 end
 ```
+
+#### ⚠️ Multi-Request Tests: Why `:record` Fails
+
+```elixir
+# ❌ WRONG - Only saves the last request!
+with_cassette "agent_conversation", [mode: :record], fn plug ->
+  response1 = Req.post!(url, json: %{msg: "Hello"}, plug: plug)    # Cassette: [interaction 1]
+  response2 = Req.post!(url, json: %{msg: "How are you?"}, plug: plug)  # Cassette: [interaction 2] (lost #1!)
+  response3 = Req.post!(url, json: %{msg: "Goodbye"}, plug: plug)  # Cassette: [interaction 3] (lost #1, #2!)
+end
+# Result: Only "Goodbye" is saved to cassette ❌
+
+# ✅ CORRECT - Saves all interactions
+with_cassette "agent_conversation", [mode: :record_missing], fn plug ->
+  response1 = Req.post!(url, json: %{msg: "Hello"}, plug: plug)
+  response2 = Req.post!(url, json: %{msg: "How are you?"}, plug: plug)
+  response3 = Req.post!(url, json: %{msg: "Goodbye"}, plug: plug)
+end
+# Result: All 3 interactions saved ✅
+```
+
+#### Best Practices
+
+1. **Use `:record_missing` by default** - Safe for all test types
+2. **Use `:replay` in CI** - Ensures tests don't make unexpected API calls
+3. **Avoid `:record` for multi-request tests** - Only use when forcing a
+   re-record of single-request cassettes
+4. **Delete cassettes to re-record** - With `:record_missing`, delete the
+   cassette file to force a fresh recording
 
 ### Sensitive Data Filtering
 
@@ -189,8 +236,8 @@ test "LLM generation" do
 end
 ```
 
-**First run**: Costs money (real API call)
-**Subsequent runs**: FREE (replays from cassette)
+**First run**: Costs money (real API call) **Subsequent runs**: FREE (replays
+from cassette)
 
 See [docs/REQ_LLM_INTEGRATION.md](docs/REQ_LLM_INTEGRATION.md) for detailed
 ReqLLM integration guide.
@@ -264,16 +311,16 @@ with_cassette "example",
 
 ## Why ReqCassette over ExVCR?
 
-| Feature                  | ReqCassette                   | ExVCR                    |
-| ------------------------ | ----------------------------- | ------------------------ |
-| Async-safe               | ✅ Yes                        | ❌ No                    |
-| HTTP client              | Req only                      | hackney, finch, etc.     |
-| Implementation           | Req.Test + Plug               | :meck (global)           |
-| Pretty-printed cassettes | ✅ Yes (native JSON objects)  | ❌ No (escaped strings)  |
-| Multiple interactions    | ✅ Yes (one file per test)    | ❌ No (one file per req) |
-| Sensitive data filtering | ✅ Built-in                   | ⚠️ Manual                |
-| Recording modes          | ✅ 4 modes                    | ⚠️ Limited               |
-| Maintenance              | Low                           | High                     |
+| Feature                  | ReqCassette                  | ExVCR                    |
+| ------------------------ | ---------------------------- | ------------------------ |
+| Async-safe               | ✅ Yes                       | ❌ No                    |
+| HTTP client              | Req only                     | hackney, finch, etc.     |
+| Implementation           | Req.Test + Plug              | :meck (global)           |
+| Pretty-printed cassettes | ✅ Yes (native JSON objects) | ❌ No (escaped strings)  |
+| Multiple interactions    | ✅ Yes (one file per test)   | ❌ No (one file per req) |
+| Sensitive data filtering | ✅ Built-in                  | ⚠️ Manual                |
+| Recording modes          | ✅ 4 modes                   | ⚠️ Limited               |
+| Maintenance              | Low                          | High                     |
 
 ## Development
 
@@ -301,7 +348,8 @@ ANTHROPIC_API_KEY=sk-... mix run examples/req_llm_demo.exs
 
 ## Documentation
 
-- **[Migration Guide](docs/MIGRATION_V0.1_TO_V0.2.md)** - Upgrading from v0.1 to v0.2
+- **[Migration Guide](docs/MIGRATION_V0.1_TO_V0.2.md)** - Upgrading from v0.1 to
+  v0.2
 - [ROADMAP.md](ROADMAP.md) - Development roadmap and v0.2 features
 - [DESIGN_SPEC.md](docs/DESIGN_SPEC.md) - Complete design specification
 - [REQ_LLM_INTEGRATION.md](docs/REQ_LLM_INTEGRATION.md) - ReqLLM integration
@@ -343,7 +391,8 @@ end
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
+for details.
 
 ## Contributing
 
