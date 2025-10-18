@@ -49,7 +49,7 @@ defmodule ReqCassette.Plug do
     matching options (`:mode`, `:cassette_dir`, and `:cassette_name` are excluded from hash).
     **Always provide this option for maintainable tests.**
   - `:cassette_dir` - Directory where cassette files are stored (default: `"cassettes"`)
-  - `:mode` - Recording mode (default: `:record_missing`). See "Recording Modes" below.
+  - `:mode` - Recording mode (default: `:record`). See "Recording Modes" below.
   - `:match_requests_on` - List of criteria for matching requests (default: `[:method, :uri, :query, :headers, :body]`)
   - `:filter_sensitive_data` - List of `{regex, replacement}` tuples to filter sensitive data
   - `:filter_request_headers` - List of request header names to remove (case-insensitive)
@@ -58,11 +58,12 @@ defmodule ReqCassette.Plug do
 
   ## Recording Modes
 
-  ReqCassette supports four recording modes that control when cassettes are created/used:
+  ReqCassette supports three recording modes that control when cassettes are created/used:
 
-  ### `:record_missing` (default)
+  ### `:record` (default)
 
-  Records new interactions, replays existing ones. Ideal for development:
+  Records new interactions, replays existing ones. Appends to existing cassettes.
+  Ideal for development:
 
       # First run: records interaction to cassette
       ReqCassette.with_cassette("api", [], fn plug ->
@@ -70,6 +71,9 @@ defmodule ReqCassette.Plug do
       end)
 
       # Subsequent runs: replays from cassette (no network call)
+
+      # To re-record: delete cassette file first
+      File.rm!("test/cassettes/api.json")
 
   ### `:replay`
 
@@ -79,15 +83,6 @@ defmodule ReqCassette.Plug do
       ReqCassette.with_cassette("api", [mode: :replay], fn plug ->
         Req.get!("https://api.example.com/data", plug: plug)
         # Raises if cassette doesn't exist or no matching interaction
-      end)
-
-  ### `:record`
-
-  Always hits the network and overwrites the cassette. Useful for refreshing cassettes:
-
-      ReqCassette.with_cassette("api", [mode: :record], fn plug ->
-        Req.get!("https://api.example.com/data", plug: plug)
-        # Always hits network, replaces entire cassette
       end)
 
   ### `:bypass`
@@ -235,7 +230,7 @@ defmodule ReqCassette.Plug do
 
   ## How It Works
 
-  1. **Recording Flow** (`:record` or `:record_missing` mode):
+  1. **Recording Flow** (`:record` mode):
      - Intercepts the outgoing Req request via the plug callback
      - Checks if a matching cassette/interaction exists
      - If not found, forwards the request to the real server
@@ -243,7 +238,7 @@ defmodule ReqCassette.Plug do
      - Saves the response to a cassette file (pretty-printed JSON)
      - Returns the response to the caller
 
-  2. **Replay Flow** (`:replay` or `:record_missing` with existing cassette):
+  2. **Replay Flow** (`:replay` or `:record` with existing cassette):
      - Intercepts the outgoing request
      - Finds the matching cassette file by name
      - Searches for a matching interaction using configured matchers
@@ -281,19 +276,19 @@ defmodule ReqCassette.Plug do
 
   - `:cassette_dir` - Directory where cassette files are stored
   - `:cassette_name` - Human-readable name for the cassette file
-  - `:mode` - Recording mode (`:replay`, `:record`, `:record_missing`, `:bypass`)
+  - `:mode` - Recording mode (`:replay`, `:record`, `:bypass`)
   - `:match_requests_on` - List of matchers for finding interactions
   """
   @type opts :: %{
           optional(:cassette_name) => String.t(),
           cassette_dir: String.t(),
-          mode: :replay | :record | :record_missing | :bypass,
+          mode: :replay | :record | :bypass,
           match_requests_on: [atom()]
         }
 
   @default_opts %{
     cassette_dir: "cassettes",
-    mode: :record_missing,
+    mode: :record,
     match_requests_on: [:method, :uri, :query, :headers, :body]
   }
 
@@ -314,7 +309,7 @@ defmodule ReqCassette.Plug do
   ## Default Options
 
   - `cassette_dir: "cassettes"` - Directory for storing cassette files
-  - `mode: :record_missing` - Record new interactions, replay existing ones
+  - `mode: :record` - Record new interactions, replay existing ones
   - `match_requests_on: [:method, :uri, :query, :headers, :body]` - Match on all criteria
 
   ## Examples
@@ -325,7 +320,7 @@ defmodule ReqCassette.Plug do
       #=> %{
       #     cassette_name: "my_api",
       #     cassette_dir: "cassettes",
-      #     mode: :record_missing,
+      #     mode: :record,
       #     match_requests_on: [:method, :uri, :query, :headers, :body]
       #   }
 
@@ -354,9 +349,8 @@ defmodule ReqCassette.Plug do
   This is the main entry point for the plug, called by Req for each HTTP request.
   The behavior depends on the configured mode:
 
-  - **`:record_missing`** (default) - Checks for matching interaction, records if not found
+  - **`:record`** (default) - Checks for matching interaction, records if not found
   - **`:replay`** - Only uses cassettes, raises error if not found
-  - **`:record`** - Always hits network and overwrites cassette
   - **`:bypass`** - Ignores cassettes, always uses network
 
   ## Parameters
@@ -433,7 +427,7 @@ defmodule ReqCassette.Plug do
 
   - **Mode `:replay`** with missing cassette
   - **Mode `:replay`** with no matching interaction
-  - **Mode `:record` or `:record_missing`** when network request fails
+  - **Mode `:record`** when network request fails
 
   The error messages include context to help debug the issue.
   """
@@ -456,12 +450,8 @@ defmodule ReqCassette.Plug do
         handle_replay(conn, body, opts)
 
       :record ->
-        # Record mode - always hit network and overwrite cassette
+        # Record mode - use cassette if exists, otherwise record (append interactions)
         handle_record(conn, body, opts)
-
-      :record_missing ->
-        # Record missing mode - use cassette if exists, otherwise record
-        handle_record_missing(conn, body, opts)
     end
   end
 
@@ -490,7 +480,7 @@ defmodule ReqCassette.Plug do
             Matching on: #{inspect(match_on)}
 
             This cassette exists but doesn't contain a matching interaction.
-            Either add the interaction to the cassette or use mode: :record_missing.
+            Either add the interaction to the cassette or use mode: :record.
             """
         end
 
@@ -499,27 +489,12 @@ defmodule ReqCassette.Plug do
         ReqCassette: Cassette not found: #{path}
 
         Mode is :replay which requires an existing cassette.
-        Either create the cassette or use mode: :record_missing.
+        Either create the cassette or use mode: :record.
         """
     end
   end
 
   defp handle_record(conn, body, opts) do
-    # Always hit network and save to cassette
-    {conn, resp_or_error} = forward_and_capture(conn, body, opts)
-    resp = normalize_response(resp_or_error)
-
-    # Create new cassette or overwrite existing
-    cassette = Cassette.new()
-    cassette = Cassette.add_interaction(cassette, conn, body, resp, opts)
-
-    path = cassette_path(opts)
-    Cassette.save(path, cassette)
-
-    resp_to_conn(conn, resp)
-  end
-
-  defp handle_record_missing(conn, body, opts) do
     path = cassette_path(opts)
 
     case Cassette.load(path) do

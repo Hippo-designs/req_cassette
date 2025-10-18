@@ -78,25 +78,19 @@ end
 
 ### Recording Modes
 
-> **⚠️ Important:** For tests making multiple HTTP requests (agents, multi-turn
-> conversations, workflows), **always use `:record_missing`**. The `:record`
-> mode overwrites the cassette file on **each request**, not at the end of the
-> test, which means only the last request will be saved.
-
 #### Quick Reference
 
-| Mode              | When to Use                                 | Cassette Behavior                                  |
-| ----------------- | ------------------------------------------- | -------------------------------------------------- |
-| `:record_missing` | **Default - use for most tests**            | Records new interactions, skips if cassette exists |
-| `:replay`         | CI/CD, deterministic testing                | Only replays, errors if cassette missing           |
-| `:record`         | Force re-record (single-request tests only) | ⚠️ Overwrites on **each** request                  |
-| `:bypass`         | Debugging, temporary disable                | Ignores cassettes, always hits network             |
+| Mode      | When to Use                  | Cassette Behavior                          |
+| --------- | ---------------------------- | ------------------------------------------ |
+| `:record` | **Default - use for most tests** | Records new interactions, replays existing |
+| `:replay` | CI/CD, deterministic testing | Only replays, errors if cassette missing   |
+| `:bypass` | Debugging, temporary disable | Ignores cassettes, always hits network     |
 
 #### Examples
 
 ```elixir
-# ✅ RECOMMENDED: :record_missing (safe for multi-request tests)
-with_cassette "api_call", [mode: :record_missing], fn plug ->
+# :record (default) - Record if cassette/interaction missing, otherwise replay
+with_cassette "api_call", fn plug ->
   Req.get!("https://api.example.com/data", plug: plug)
 end
 
@@ -105,31 +99,25 @@ with_cassette "api_call", [mode: :replay], fn plug ->
   Req.get!("https://api.example.com/data", plug: plug)
 end
 
-# ⚠️ :record - Always hit network and overwrite cassette
-# WARNING: Only use for single-request tests!
-with_cassette "api_call", [mode: :record], fn plug ->
-  Req.get!("https://api.example.com/data", plug: plug)
-end
-
 # :bypass - Ignore cassettes entirely, always use network
 with_cassette "api_call", [mode: :bypass], fn plug ->
   Req.get!("https://api.example.com/data", plug: plug)
 end
+
+# To re-record a cassette: delete it first, then run with :record
+File.rm!("test/cassettes/api_call.json")
+with_cassette "api_call", fn plug ->
+  Req.get!("https://api.example.com/data", plug: plug)
+end
 ```
 
-#### ⚠️ Multi-Request Tests: Why `:record` Fails
+#### Multiple Requests Per Cassette
+
+The `:record` mode safely handles tests with multiple HTTP requests:
 
 ```elixir
-# ❌ WRONG - Only saves the last request!
-with_cassette "agent_conversation", [mode: :record], fn plug ->
-  response1 = Req.post!(url, json: %{msg: "Hello"}, plug: plug)    # Cassette: [interaction 1]
-  response2 = Req.post!(url, json: %{msg: "How are you?"}, plug: plug)  # Cassette: [interaction 2] (lost #1!)
-  response3 = Req.post!(url, json: %{msg: "Goodbye"}, plug: plug)  # Cassette: [interaction 3] (lost #1, #2!)
-end
-# Result: Only "Goodbye" is saved to cassette ❌
-
-# ✅ CORRECT - Saves all interactions
-with_cassette "agent_conversation", [mode: :record_missing], fn plug ->
+# ✅ All interactions are saved
+with_cassette "agent_conversation", fn plug ->
   response1 = Req.post!(url, json: %{msg: "Hello"}, plug: plug)
   response2 = Req.post!(url, json: %{msg: "How are you?"}, plug: plug)
   response3 = Req.post!(url, json: %{msg: "Goodbye"}, plug: plug)
@@ -139,12 +127,9 @@ end
 
 #### Best Practices
 
-1. **Use `:record_missing` by default** - Safe for all test types
+1. **Use `:record` by default** - Safe for all test types (single or multi-request)
 2. **Use `:replay` in CI** - Ensures tests don't make unexpected API calls
-3. **Avoid `:record` for multi-request tests** - Only use when forcing a
-   re-record of single-request cassettes
-4. **Delete cassettes to re-record** - With `:record_missing`, delete the
-   cassette file to force a fresh recording
+3. **Delete cassettes to re-record** - Remove the cassette file to force a fresh recording
 
 ### Sensitive Data Filtering
 
@@ -294,7 +279,7 @@ ReqCassette automatically detects and handles three body types:
 with_cassette "example",
   [
     cassette_dir: "test/cassettes",              # Where to store cassettes
-    mode: :record_missing,                        # Recording mode
+    mode: :record,                                # Recording mode
     match_requests_on: [:method, :uri, :body],   # Request matching criteria
     filter_sensitive_data: [                      # Regex-based redaction
       {~r/api_key=[\w-]+/, "api_key=<REDACTED>"}
@@ -321,7 +306,7 @@ with_cassette "example",
 | Pretty-printed cassettes | ✅ Yes (native JSON objects) | ❌ No (escaped strings)  |
 | Multiple interactions    | ✅ Yes (one file per test)   | ❌ No (one file per req) |
 | Sensitive data filtering | ✅ Built-in                  | ⚠️ Manual                |
-| Recording modes          | ✅ 4 modes                   | ⚠️ Limited               |
+| Recording modes          | ✅ 3 modes                   | ⚠️ Limited               |
 | Maintenance              | Low                          | High                     |
 
 ## Development

@@ -60,8 +60,8 @@ defmodule ReqCassette do
 
   Control when to record and replay:
 
-      # :record_missing (default) - Record if cassette doesn't exist, otherwise replay
-      with_cassette "api_call", [mode: :record_missing], fn plug ->
+      # :record (default) - Record if cassette doesn't exist or interaction not found, otherwise replay
+      with_cassette "api_call", [mode: :record], fn plug ->
         Req.get!("https://api.example.com/data", plug: plug)
       end
 
@@ -70,13 +70,14 @@ defmodule ReqCassette do
         Req.get!("https://api.example.com/data", plug: plug)
       end
 
-      # :record - Always hit network and overwrite cassette
-      with_cassette "api_call", [mode: :record], fn plug ->
+      # :bypass - Ignore cassettes entirely, always use network
+      with_cassette "api_call", [mode: :bypass], fn plug ->
         Req.get!("https://api.example.com/data", plug: plug)
       end
 
-      # :bypass - Ignore cassettes entirely, always use network
-      with_cassette "api_call", [mode: :bypass], fn plug ->
+      # To re-record a cassette: delete it first
+      File.rm!("test/cassettes/api_call.json")
+      with_cassette "api_call", [mode: :record], fn plug ->
         Req.get!("https://api.example.com/data", plug: plug)
       end
 
@@ -302,10 +303,9 @@ defmodule ReqCassette do
   ## Options
 
   - `:cassette_dir` - Directory where cassettes are stored (default: "test/cassettes")
-  - `:mode` - Recording mode (default: `:record_missing`)
+  - `:mode` - Recording mode (default: `:record`)
     - `:replay` - Only replay from cassette, error if missing
-    - `:record` - Always hit network and overwrite cassette
-    - `:record_missing` - Record if missing, otherwise replay
+    - `:record` - Record if cassette/interaction missing, otherwise replay
     - `:bypass` - Ignore cassettes, always hit network
   - `:match_requests_on` - List of matchers (default: `[:method, :uri, :query, :headers, :body]`)
     Available: `:method`, `:uri`, `:query`, `:headers`, `:body`
@@ -382,7 +382,7 @@ defmodule ReqCassette do
     plug_opts = %{
       cassette_name: name,
       cassette_dir: opts[:cassette_dir] || "test/cassettes",
-      mode: opts[:mode] || :record_missing,
+      mode: opts[:mode] || :record,
       match_requests_on: opts[:match_requests_on] || [:method, :uri, :query, :headers, :body],
       filter_sensitive_data: opts[:filter_sensitive_data] || [],
       filter_request_headers: opts[:filter_request_headers] || [],

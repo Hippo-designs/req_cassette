@@ -31,7 +31,7 @@ defmodule ReqCassette.ReqLLMTest do
       cassette_opts_record = %{
         cassette_dir: @cassette_dir,
         cassette_name: "llm_poem_generation",
-        mode: :record_missing,
+        mode: :record,
         filter_request_headers: ["authorization", "x-api-key", "cookie"]
       }
 
@@ -139,7 +139,7 @@ defmodule ReqCassette.ReqLLMTest do
       cassette_opts_record = %{
         cassette_dir: @cassette_dir,
         cassette_name: "mocked_llm_response",
-        mode: :record_missing,
+        mode: :record,
         filter_request_headers: ["authorization", "x-api-key", "cookie"]
       }
 

@@ -69,7 +69,8 @@ order:
 1. **Regex filters** - Pattern-based replacement
 2. **Header filters** - Remove specific headers
 3. **Request callback** (`filter_request`) - Request-only custom filtering
-4. **Response callback** (`filter_response`) - Response-only custom filtering (always safe!)
+4. **Response callback** (`filter_response`) - Response-only custom filtering
+   (always safe!)
 
 ### 1. Header Filtering
 
@@ -273,7 +274,7 @@ defmodule MyApp.LLMTest do
   @cassette_dir "test/cassettes/llm"
   @cassette_opts [
     cassette_dir: @cassette_dir,
-    mode: :record_missing,
+    mode: :record,
     filter_request_headers: ["authorization", "x-api-key", "cookie"]
   ]
 
@@ -301,7 +302,7 @@ For agents making multiple LLM calls:
   cassette_opts: [
     cassette_name: "my_agent",
     cassette_dir: "test/cassettes",
-    mode: :record_missing,
+    mode: :record,
     filter_request_headers: ["authorization", "x-api-key", "cookie"]
   ]
 )
@@ -444,7 +445,7 @@ with_cassette "payment_api",
 ```elixir
 with_cassette "llm_protected",
   [
-    mode: :record_missing,
+    mode: :record,
     filter_request_headers: ["authorization", "x-api-key", "cookie"],
     filter_sensitive_data: [
       # Normalize timestamps for deterministic cassettes
@@ -541,7 +542,7 @@ defmodule MyApp.APITest do
 
   @cassette_opts [
     cassette_dir: "test/cassettes",
-    mode: :record_missing,
+    mode: :record,
     filter_request_headers: ["authorization", "x-api-key", "cookie"],
     filter_response_headers: ["set-cookie"]
   ]
@@ -560,7 +561,7 @@ end
 setup do
   mode = case System.get_env("CI") do
     "true" -> :replay  # CI always replays (no API keys needed)
-    _ -> if System.get_env("RECORD"), do: :record_missing, else: :replay
+    _ -> if System.get_env("RECORD"), do: :record, else: :replay
   end
 
   cassette_opts = [
@@ -688,7 +689,7 @@ with_cassette "secure_test",
 3. Use `filter_request` for request normalization (timestamps, IDs)
 4. Test cassettes for leaked secrets before committing
 5. Use environment variables to control recording modes
-6. Default to `:record_missing` mode with filtering enabled
+6. Default to `:record` mode with filtering enabled
 
 For more examples, see:
 

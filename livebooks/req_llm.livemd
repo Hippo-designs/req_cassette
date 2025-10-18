@@ -385,7 +385,7 @@ IO.puts("Agent cassettes created: #{length(agent_cassettes)}")
     cassette_opts: [
       cassette_dir: agent_cassette_dir,
       cassette_name: "agent",
-      mode: :record_missing,
+      mode: :record,
       filter_request_headers: ["authorization", "x-api-key", "cookie"]
     ]
   )
@@ -396,7 +396,7 @@ IO.puts("Agent cassettes created: #{length(agent_cassettes)}")
     cassette_opts: [
       cassette_dir: agent_cassette_dir,
       cassette_name: "agent",
-      mode: :record_missing,
+      mode: :record,
       filter_request_headers: ["authorization", "x-api-key", "cookie"]
     ]
   )

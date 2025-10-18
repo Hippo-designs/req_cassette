@@ -425,7 +425,7 @@ defmodule ReqCassette.FilterTest do
 
       cassette_opts = [
         cassette_dir: @cassette_dir,
-        mode: :record_missing,
+        mode: :record,
         filter_request_headers: ["authorization", "x-api-key"]
       ]
 
@@ -506,7 +506,7 @@ defmodule ReqCassette.FilterTest do
 
       cassette_opts = [
         cassette_dir: @cassette_dir,
-        mode: :record_missing,
+        mode: :record,
         filter_sensitive_data: [
           {~r/api_key=[\w-]+/, "api_key=<REDACTED>"}
         ]
@@ -586,7 +586,7 @@ defmodule ReqCassette.FilterTest do
 
       cassette_opts = [
         cassette_dir: @cassette_dir,
-        mode: :record_missing,
+        mode: :record,
         filter_sensitive_data: [
           {~r/token=[\w-]+/, "token=<REDACTED>"}
         ],
@@ -688,7 +688,7 @@ defmodule ReqCassette.FilterTest do
 
       cassette_opts = [
         cassette_dir: @cassette_dir,
-        mode: :record_missing,
+        mode: :record,
         filter_sensitive_data: [
           # Filter password in JSON request body
           {~r/"password":"[^"]+"/, ~s("password":"<REDACTED>")},
@@ -814,7 +814,7 @@ defmodule ReqCassette.FilterTest do
 
       cassette_opts = [
         cassette_dir: @cassette_dir,
-        mode: :record_missing,
+        mode: :record,
         before_record: redact_pii,
         # Only match on method and URI, not body
         # This allows the callback to safely modify request body without breaking replay
@@ -912,7 +912,7 @@ defmodule ReqCassette.FilterTest do
 
       cassette_opts = [
         cassette_dir: @cassette_dir,
-        mode: :record_missing,
+        mode: :record,
         filter_sensitive_data: [
           # Filter user IDs in URI path
           {~r/user_\d+/, "user_<ID>"}
@@ -1001,7 +1001,7 @@ defmodule ReqCassette.FilterTest do
 
       cassette_opts = [
         cassette_dir: @cassette_dir,
-        mode: :record_missing,
+        mode: :record,
         filter_request: filter_req,
         match_requests_on: [:method, :uri]
       ]
@@ -1185,7 +1185,7 @@ defmodule ReqCassette.FilterTest do
 
       cassette_opts = [
         cassette_dir: @cassette_dir,
-        mode: :record_missing,
+        mode: :record,
         filter_response: filter_resp
       ]
 
@@ -1237,7 +1237,7 @@ defmodule ReqCassette.FilterTest do
 
       cassette_opts = [
         cassette_dir: @cassette_dir,
-        mode: :record_missing,
+        mode: :record,
         filter_request: filter_req,
         # Include body in matching
         match_requests_on: [:method, :uri, :body]
@@ -1575,7 +1575,7 @@ defmodule ReqCassette.FilterTest do
 
       cassette_opts = [
         cassette_dir: @cassette_dir,
-        mode: :record_missing,
+        mode: :record,
         filter_request: filter_req,
         # Headers are used for matching
         match_requests_on: [:method, :uri, :headers]

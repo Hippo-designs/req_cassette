@@ -3,7 +3,55 @@
 This document outlines the development roadmap for ReqCassette based on the
 [Design Specification](docs/DESIGN_SPEC.md).
 
-## Current Status (v0.1.0)
+> **📌 Current Release:** v0.3.0 - Simplified recording modes (3 modes instead
+> of 4)
+>
+> **Breaking Change:** `:record_missing` mode removed, `:record` mode now safely
+> appends interactions. See
+> [Migration Guide v0.2 → v0.3](docs/MIGRATION_V0.2_TO_V0.3.md) for details.
+
+---
+
+## v0.3.0 (Released) - Simplified Recording Modes
+
+**Goal:** Eliminate dangerous `:record` mode behavior and simplify the API
+
+### ✅ Completed
+
+- ✅ **Removed `:record_missing` mode** - Use `:record` instead
+- ✅ **Made `:record` mode safer** - Now appends interactions instead of
+  overwriting
+- ✅ **Simplified API** - 3 modes instead of 4 (`:record`, `:replay`, `:bypass`)
+- ✅ **Eliminated multi-request test bugs** - `:record` mode now safe for all
+  test types
+- ✅ **Updated all documentation** - Migration guide, README, and integration
+  guides
+
+### Breaking Changes
+
+| v0.2 Mode         | v0.3 Mode | Notes                                     |
+| ----------------- | --------- | ----------------------------------------- |
+| `:record_missing` | `:record` | Exact same behavior                       |
+| `:record`         | (removed) | Delete cassette first, then use `:record` |
+| `:replay`         | `:replay` | No change                                 |
+| `:bypass`         | `:bypass` | No change                                 |
+
+**Migration:** Replace all `:record_missing` with `:record`. See
+[Migration Guide](docs/MIGRATION_V0.2_TO_V0.3.md).
+
+---
+
+## v0.2.0 (Released) - Core Features
+
+**Goal:** Production-ready VCR library with clean API and essential features
+
+### ✅ Completed
+
+All v0.2.0 features have been implemented. See below for historical reference.
+
+---
+
+## Historical: v0.1.0 Status
 
 ### ✅ Implemented
 
@@ -28,15 +76,14 @@ This document outlines the development roadmap for ReqCassette based on the
 
 ---
 
-## Next Release (v0.2.0) - Core Features
+## Historical: v0.2.0 Planning (Released)
 
-**Goal:** Production-ready VCR library with clean API and essential features
+This section documents the original planning for v0.2.0. All features have been
+implemented.
 
-### ✅ In Scope
+### Recording Modes (Implemented in v0.2.0, Modified in v0.3.0)
 
-#### 1. Recording Modes
-
-Implement four recording modes via the `:mode` option:
+Original plan was four recording modes via the `:mode` option:
 
 - **`:replay`** (default for CI) - Replay from cassette, error if cassette
   missing

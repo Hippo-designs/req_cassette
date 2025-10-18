@@ -23,7 +23,7 @@ defmodule ReqCassette.PlugTest do
       end)
 
       # Create a Req request that uses our cassette plug
-      # Using default mode (:record_missing)
+      # Using default mode (:record)
       response =
         Req.get!(
           "http://localhost:#{bypass.port}/users/1",
@@ -62,7 +62,7 @@ defmodule ReqCassette.PlugTest do
       # Take down the bypass server to ensure we're not hitting the network
       Bypass.down(bypass)
 
-      # Second request - should replay from cassette (default mode: :record_missing)
+      # Second request - should replay from cassette (default mode: :record)
       replay_response =
         Req.get!(
           "http://localhost:#{bypass.port}/users/2",
