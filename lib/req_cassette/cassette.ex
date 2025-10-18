@@ -482,27 +482,29 @@ defmodule ReqCassette.Cassette do
   defp interaction_matches?(interaction, conn, request_body, match_on, filter_opts) do
     request = interaction["request"]
 
+    # Build incoming request structure and apply filter_request callback if present
+    incoming_request = build_incoming_request(conn, request_body, filter_opts)
+
     Enum.all?(match_on, fn matcher ->
       case matcher do
         :method ->
-          String.upcase(request["method"]) == String.upcase(conn.method)
+          String.upcase(request["method"]) == String.upcase(incoming_request["method"])
 
         :uri ->
           # Apply regex filters to incoming URI for comparison
-          incoming_uri = build_uri(conn)
-
           filtered_incoming_uri =
-            apply_regex_filters_to_string(incoming_uri, filter_opts[:filter_sensitive_data] || [])
+            apply_regex_filters_to_string(
+              incoming_request["uri"],
+              filter_opts[:filter_sensitive_data] || []
+            )
 
           filtered_incoming_uri == request["uri"]
 
         :query ->
           # Apply regex filters to query string
-          incoming_query = conn.query_string
-
           filtered_incoming_query =
             apply_regex_filters_to_string(
-              incoming_query,
+              incoming_request["query_string"],
               filter_opts[:filter_sensitive_data] || []
             )
 
@@ -511,7 +513,10 @@ defmodule ReqCassette.Cassette do
         :headers ->
           # Apply header filters to incoming headers before comparing
           filtered_incoming_headers =
-            apply_header_filters(conn.req_headers, filter_opts[:filter_request_headers] || [])
+            apply_header_filters(
+              incoming_request["headers"],
+              filter_opts[:filter_request_headers] || []
+            )
 
           normalize_headers(request["headers"]) == normalize_headers(filtered_incoming_headers)
 
@@ -519,8 +524,15 @@ defmodule ReqCassette.Cassette do
           # For JSON bodies, compare normalized JSON
           # For other bodies, compare as strings
           # Apply filters to incoming body before comparing
+
+          # Extract body from incoming_request (could be body, body_json, or body_blob)
+          incoming_body = reconstruct_request_body(incoming_request)
+
           filtered_body =
-            apply_regex_filters_to_string(request_body, filter_opts[:filter_sensitive_data] || [])
+            apply_regex_filters_to_string(
+              incoming_body,
+              filter_opts[:filter_sensitive_data] || []
+            )
 
           bodies_match?(request, filtered_body, conn.req_headers)
 
@@ -528,6 +540,30 @@ defmodule ReqCassette.Cassette do
           true
       end
     end)
+  end
+
+  # Build incoming request structure and apply filter_request callback
+  defp build_incoming_request(conn, request_body, filter_opts) do
+    # Detect body type and encode it the same way as build_interaction does
+    body_type = BodyType.detect_type(request_body, headers_to_map(conn.req_headers))
+    {body_field, body_value} = BodyType.encode(request_body, body_type)
+
+    incoming =
+      %{
+        "method" => conn.method,
+        "uri" => build_uri(conn),
+        "query_string" => conn.query_string,
+        "headers" => headers_to_map(conn.req_headers),
+        "body_type" => to_string(body_type)
+      }
+      |> Map.put(body_field, body_value)
+
+    # Apply filter_request callback if present
+    case filter_opts[:filter_request] do
+      nil -> incoming
+      callback when is_function(callback, 1) -> callback.(incoming)
+      _ -> incoming
+    end
   end
 
   defp apply_regex_filters_to_string(string, []), do: string
@@ -541,7 +577,14 @@ defmodule ReqCassette.Cassette do
   defp apply_header_filters(headers, []), do: headers
 
   defp apply_header_filters(headers, filter_list) do
-    headers_map = headers_to_map(headers)
+    # Handle both list and map formats
+    headers_map =
+      if is_list(headers) do
+        headers_to_map(headers)
+      else
+        headers
+      end
+
     filter_list_normalized = Enum.map(filter_list, &String.downcase/1)
 
     filtered_map =
@@ -550,7 +593,12 @@ defmodule ReqCassette.Cassette do
       end)
       |> Enum.into(%{})
 
-    Map.to_list(filtered_map)
+    # Return in same format as input
+    if is_list(headers) do
+      Map.to_list(filtered_map)
+    else
+      filtered_map
+    end
   end
 
   defp bodies_match?(request, conn_body, conn_headers) do

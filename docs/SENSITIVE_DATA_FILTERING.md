@@ -10,7 +10,8 @@ recordings.
 - [Filtering Methods](#filtering-methods)
   - [1. Header Filtering](#1-header-filtering)
   - [2. Regex Pattern Filtering](#2-regex-pattern-filtering)
-  - [3. Callback-Based Filtering](#3-callback-based-filtering)
+  - [3. Request Callback Filtering](#3-request-callback-filtering)
+  - [4. Response Callback Filtering](#4-response-callback-filtering)
 - [LLM API Protection](#llm-api-protection)
 - [Common Patterns](#common-patterns)
 - [Complete Examples](#complete-examples)
@@ -62,12 +63,13 @@ saved.
 
 ## Filtering Methods
 
-ReqCassette supports three complementary filtering approaches, applied in this
+ReqCassette supports four complementary filtering approaches, applied in this
 order:
 
 1. **Regex filters** - Pattern-based replacement
 2. **Header filters** - Remove specific headers
-3. **Callback filter** - Custom transformation logic
+3. **Request callback** (`filter_request`) - Request-only custom filtering
+4. **Response callback** (`filter_response`) - Response-only custom filtering (always safe!)
 
 ### 1. Header Filtering
 
@@ -131,21 +133,70 @@ with_cassette "api_test",
 **Result:** Cassette contains the URL
 `https://api.example.com/data?api_key=<REDACTED>`
 
-### 3. Callback-Based Filtering
+### 3. Request Callback Filtering
 
-Custom filtering logic via a callback function for complex scenarios.
+Custom filtering for requests with complex logic.
 
-**When to use:** For complex transformations, conditional filtering, or when you
-need full control.
+**When to use:** For complex request transformations, normalization, or
+conditional filtering based on request data.
 
 ```elixir
 with_cassette "api_test",
   [
-    before_record: fn interaction ->
-      interaction
-      |> update_in(["request", "body_json", "email"], fn _ -> "user@example.com" end)
-      |> update_in(["response", "body_json", "password"], fn _ -> "<REDACTED>" end)
-      |> put_in(["response", "headers", "x-secret"], ["<REDACTED>"])
+    filter_request: fn request ->
+      request
+      |> update_in(["body_json", "email"], fn _ -> "user@example.com" end)
+      |> update_in(["body_json", "timestamp"], fn _ -> "<NORMALIZED>" end)
+    end
+  ],
+  fn plug ->
+    Req.post!(
+      "https://api.example.com/events",
+      json: %{event: "login", timestamp: DateTime.utc_now(), email: "alice@real.com"},
+      plug: plug
+    )
+  end
+```
+
+**Features:**
+
+- Applied during BOTH recording and matching (like regex/header filters)
+- Only receives request portion of interaction
+- Safe for complex request transformations
+- Cannot break replay if used correctly
+
+**⚠️ Important:** If `filter_request` modifies fields used for matching (method,
+uri, query, headers, body), ensure transformations are idempotent or adjust
+`match_requests_on` to exclude those fields.
+
+**Request structure:**
+
+```elixir
+%{
+  "method" => "POST",
+  "uri" => "https://...",
+  "query_string" => "...",
+  "headers" => %{},
+  "body_type" => "json",
+  "body_json" => %{}  # or "body" for text, "body_blob" for binary
+}
+```
+
+### 4. Response Callback Filtering
+
+Custom filtering for responses - always safe!
+
+**When to use:** For complex response transformations, redaction, or conditional
+filtering based on response data.
+
+```elixir
+with_cassette "api_test",
+  [
+    filter_response: fn response ->
+      response
+      |> update_in(["body_json", "password"], fn _ -> "<REDACTED>" end)
+      |> update_in(["body_json", "email"], fn _ -> "user@example.com" end)
+      |> put_in(["headers", "x-secret"], ["<REDACTED>"])
     end
   ],
   fn plug ->
@@ -159,28 +210,19 @@ with_cassette "api_test",
 
 **Features:**
 
-- Full control over the interaction map
-- Access to both request and response
-- Can modify any field
-- Useful for complex normalization (timestamps, UUIDs)
+- Applied ONLY during recording
+- Only receives response portion of interaction
+- Always safe - responses don't affect matching
+- Simplest callback type for response filtering
 
-**Interaction structure:**
+**Response structure:**
 
 ```elixir
 %{
-  "request" => %{
-    "method" => "POST",
-    "uri" => "...",
-    "headers" => %{},
-    "body_type" => "json",
-    "body_json" => %{}
-  },
-  "response" => %{
-    "status" => 200,
-    "headers" => %{},
-    "body_type" => "json",
-    "body_json" => %{}
-  }
+  "status" => 200,
+  "headers" => %{},
+  "body_type" => "json",
+  "body_json" => %{}  # or "body" for text, "body_blob" for binary
 }
 ```
 
@@ -374,11 +416,11 @@ with_cassette "payment_api",
       # SSN
       {~r/\d{3}-\d{2}-\d{4}/, "XXX-XX-XXXX"}
     ],
-    before_record: fn interaction ->
-      # Redact customer email
+    # Redact customer email in request
+    filter_request: fn request ->
       update_in(
-        interaction,
-        ["request", "body_json", "customer", "email"],
+        request,
+        ["body_json", "customer", "email"],
         fn _ -> "customer@example.com" end
       )
     end
@@ -410,11 +452,15 @@ with_cassette "llm_protected",
       # Normalize request IDs
       {~r/"request_id":"[^"]+"/, ~s("request_id":"<NORMALIZED>")}
     ],
-    before_record: fn interaction ->
-      # Normalize any remaining dynamic fields
-      interaction
-      |> put_in(["response", "headers", "x-request-id"], ["<NORMALIZED>"])
-      |> put_in(["response", "body_json", "id"], "<NORMALIZED>")
+    # Normalize request fields
+    filter_request: fn request ->
+      update_in(request, ["body_json", "created_at"], fn _ -> "<NORMALIZED>" end)
+    end,
+    # Normalize response fields
+    filter_response: fn response ->
+      response
+      |> put_in(["headers", "x-request-id"], ["<NORMALIZED>"])
+      |> put_in(["body_json", "id"], "<NORMALIZED>")
     end
   ],
   fn plug ->
@@ -620,10 +666,14 @@ with_cassette "secure_test",
       {~r/"token":"[^"]+"/, ~s("token":"<REDACTED>")}
     ],
 
-    # Custom filtering
-    before_record: fn interaction ->
-      update_in(interaction, ["response", "body_json", "email"],
-        fn _ -> "user@example.com" end)
+    # Request filtering (normalization)
+    filter_request: fn request ->
+      update_in(request, ["body_json", "timestamp"], fn _ -> "<NORMALIZED>" end)
+    end,
+
+    # Response filtering (redaction)
+    filter_response: fn response ->
+      update_in(response, ["body_json", "email"], fn _ -> "user@example.com" end)
     end
   ],
   fn plug ->
@@ -634,9 +684,11 @@ with_cassette "secure_test",
 **Remember:**
 
 1. Filter authorization headers for ALL LLM APIs
-2. Test cassettes for leaked secrets before committing
-3. Use environment variables to control recording modes
-4. Default to `:record_missing` mode with filtering enabled
+2. Use `filter_response` for response-only filtering (always safe!)
+3. Use `filter_request` for request normalization (timestamps, IDs)
+4. Test cassettes for leaked secrets before committing
+5. Use environment variables to control recording modes
+6. Default to `:record_missing` mode with filtering enabled
 
 For more examples, see:
 

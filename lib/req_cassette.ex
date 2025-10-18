@@ -90,11 +90,120 @@ defmodule ReqCassette do
           filter_response_headers: ["set-cookie"],
           filter_sensitive_data: [
             {~r/api_key=[\\w-]+/, "api_key=<REDACTED>"}
-          ]
+          ],
+          filter_request: fn request ->
+            update_in(request, ["body_json", "timestamp"], fn _ -> "<NORMALIZED>" end)
+          end,
+          filter_response: fn response ->
+            update_in(response, ["body_json", "secret"], fn _ -> "<REDACTED>" end)
+          end
         ],
         fn plug ->
           Req.post!("https://api.example.com/login", json: %{...}, plug: plug)
         end
+
+  ReqCassette provides four filtering approaches for sensitive data protection:
+
+  - **`filter_sensitive_data`** - Regex pattern replacement (fast, for common patterns)
+  - **`filter_request_headers`** / **`filter_response_headers`** - Remove auth headers
+  - **`filter_request`** - Custom request filtering (normalization, complex logic)
+  - **`filter_response`** - Custom response filtering (always safe!)
+
+  ### Filter Application Order
+
+  When recording, filters are applied in this sequence:
+
+  1. **Regex filters** → Request URI, query, body + Response body
+  2. **Header filters** → Request headers + Response headers
+  3. **Request callback** → Request only
+  4. **Response callback** → Response only
+  5. **Full callback** (`before_record`) → Entire interaction (advanced)
+
+  This ensures simple filters run first, then targeted callbacks, and finally the
+  advanced `before_record` hook sees the complete filtered result.
+
+  **Note:** Only `filter_request` is also applied during replay matching to ensure
+  requests match correctly. All other filters only run during recording.
+
+  For detailed filtering documentation, see `ReqCassette.Filter`.
+
+  ## Advanced: before_record Hook
+
+  **⚠️ ADVANCED - Use with Caution**
+
+  The `:before_record` option provides full access to the interaction for cross-field
+  manipulation. This is **NOT** for filtering - use `filter_request` and `filter_response`
+  for that instead.
+
+  ### ⚠️ Critical Warnings
+
+  - **Avoid modifying request fields** - This will break replay matching!
+  - **Use `filter_request` for request filtering** - Safer and applied during matching
+  - **Use `filter_response` for response filtering** - Always safe
+  - **Reserve `before_record` for special cases only** - When you need both request and response
+
+  ### Safe Use Case: Response Enrichment
+
+  Computing response fields based on request data:
+
+      with_cassette "api_call",
+        [
+          before_record: fn interaction ->
+            # ✅ SAFE: Only modifying response based on request
+            request_id = interaction["request"]["body_json"]["id"]
+
+            put_in(
+              interaction,
+              ["response", "body_json", "request_ref"],
+              request_id
+            )
+          end
+        ],
+        fn plug ->
+          Req.post!("https://api.example.com/process", json: %{id: 123}, plug: plug)
+        end
+
+  ### ⚠️ Dangerous Anti-Pattern
+
+      with_cassette "api_call",
+        [
+          before_record: fn interaction ->
+            # ❌ DANGER: Modifying request breaks replay matching!
+            update_in(interaction, ["request", "body_json", "timestamp"], fn _ ->
+              "<NORMALIZED>"
+            end)
+          end
+        ],
+        fn plug ->
+          # This will fail on replay - request won't match saved cassette!
+          Req.post!("https://api.example.com/data", json: %{...}, plug: plug)
+        end
+
+  **Instead, use `filter_request`:**
+
+      with_cassette "api_call",
+        [
+          # ✅ CORRECT: filter_request is applied during both recording and matching
+          filter_request: fn request ->
+            update_in(request, ["body_json", "timestamp"], fn _ -> "<NORMALIZED>" end)
+          end
+        ],
+        fn plug ->
+          Req.post!("https://api.example.com/data", json: %{...}, plug: plug)
+        end
+
+  ### When to Use before_record
+
+  **Only** use `before_record` when you need to:
+  - Compute derived fields from **both** request and response
+  - Add metadata that references both sides of the interaction
+  - Perform custom transformations that require full context
+
+  **For everything else:**
+  - Use `filter_sensitive_data` for regex patterns
+  - Use `filter_request_headers` / `filter_response_headers` for auth headers
+  - Use `filter_request` for request-only transformations
+  - Use `filter_response` for response-only transformations
 
   ## Usage with ReqLLM
 
@@ -278,6 +387,8 @@ defmodule ReqCassette do
       filter_sensitive_data: opts[:filter_sensitive_data] || [],
       filter_request_headers: opts[:filter_request_headers] || [],
       filter_response_headers: opts[:filter_response_headers] || [],
+      filter_request: opts[:filter_request],
+      filter_response: opts[:filter_response],
       before_record: opts[:before_record]
     }
 

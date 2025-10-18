@@ -20,9 +20,9 @@ defmodule ReqCassette.Filter do
 
   ## Filtering Types
 
-  ReqCassette supports three complementary filtering approaches:
+  ReqCassette supports four complementary filtering approaches:
 
-  ### 1. Regex-Based Replacement
+  ### 1. Regex-Based Replacement ✅ Recommended for patterns
 
   Replace patterns in URIs, query strings, and request/response bodies using regular expressions:
 
@@ -60,7 +60,7 @@ defmodule ReqCassette.Filter do
   {~r/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/, "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"}
   ```
 
-  ### 2. Header Removal
+  ### 2. Header Removal ✅ Recommended for auth headers
 
   Remove sensitive headers from requests and responses:
 
@@ -74,35 +74,114 @@ defmodule ReqCassette.Filter do
   - Completely removes headers from cassette
   - Separate lists for request and response headers
 
-  ### 3. Callback-Based Filtering
+  ### 3. Request Callback Filtering ✅ Safe for complex request filtering
 
-  Custom filtering logic via a callback function:
+  Target request-only filtering with custom logic:
 
       filters = [
-        before_record: fn interaction ->
-          interaction
-          |> update_in(["request", "body_json", "email"], fn _ -> "redacted@example.com" end)
-          |> update_in(["response", "body_json", "password"], fn _ -> "<REDACTED>" end)
-          |> put_in(["response", "headers", "x-secret"], ["<REDACTED>"])
+        filter_request: fn request ->
+          request
+          |> update_in(["body_json", "email"], fn _ -> "redacted@example.com" end)
+          |> update_in(["body_json", "timestamp"], fn _ -> "<NORMALIZED>" end)
         end
       ]
 
   **Features:**
-  - Full control over the interaction map
-  - Access to request and response
-  - Can modify any field
-  - Useful for complex filtering logic
+  - Applied during BOTH recording and matching (like regex/header filters)
+  - Only receives request portion of interaction
+  - Safe for complex request transformations
+
+  **⚠️ Important:** If `filter_request` modifies fields used for matching
+  (method, uri, query, headers, body), consider adjusting `match_requests_on`
+  to exclude those fields, or ensure transformations are idempotent.
+
+  **When to use:**
+  - Complex request body transformations
+  - Conditional filtering based on request fields
+  - Normalization that can't be expressed as regex
+
+  **Request structure:**
+  ```elixir
+  %{
+    "method" => "POST",
+    "uri" => "https://...",
+    "query_string" => "...",
+    "headers" => %{},
+    "body_type" => "json",
+    "body_json" => %{}  # or "body" for text, "body_blob" for binary
+  }
+  ```
+
+  ### 4. Response Callback Filtering ✅ Always safe
+
+  Target response-only filtering:
+
+      filters = [
+        filter_response: fn response ->
+          response
+          |> update_in(["body_json", "secret"], fn _ -> "<REDACTED>" end)
+          |> update_in(["headers", "set-cookie"], fn _ -> ["<REDACTED>"] end)
+        end
+      ]
+
+  **Features:**
+  - Applied ONLY during recording
+  - Only receives response portion of interaction
+  - Always safe - responses don't affect matching
+  - Simplest callback type
+
+  **When to use:**
+  - Response-only filtering
+  - Complex response transformations
+  - Conditional filtering based on response data
+
+  **Response structure:**
+  ```elixir
+  %{
+    "status" => 200,
+    "headers" => %{},
+    "body_type" => "json",
+    "body_json" => %{}  # or "body" for text, "body_blob" for binary
+  }
+  ```
 
   ## Filter Application Order
 
-  Filters are applied in this specific order:
+  Filters are applied in this specific order during recording:
 
-  1. **Regex filters** - Applied to URI, query string, request body, response body
-  2. **Header filters** - Remove specified request/response headers
-  3. **Callback filter** - Custom transformation function
+  1. **Regex filters** (`filter_sensitive_data`) - Applied to:
+     - Request URI
+     - Request query_string
+     - Request body (all types: json, text, blob)
+     - Response body (all types: json, text, blob)
 
-  This ordering allows you to do coarse-grained filtering with regex/headers, then
-  fine-tune with callbacks.
+  2. **Header filters** - Applied to:
+     - Request headers (`filter_request_headers`)
+     - Response headers (`filter_response_headers`)
+
+  3. **Request callback** (`filter_request`) - Applied to:
+     - Request only (entire request object)
+
+  4. **Response callback** (`filter_response`) - Applied to:
+     - Response only (entire response object)
+
+  5. **Full interaction callback** (`before_record`) - Applied to:
+     - Entire interaction (both request AND response)
+     - See main module docs for warnings about this advanced option
+
+  This ordering ensures coarse-grained filters (regex, headers) run first, then
+  specific callbacks (request/response), and finally the advanced `before_record`
+  can access the complete filtered result.
+
+  ## Choosing the Right Filter Type
+
+  | Need                               | Recommended Approach            |
+  |------------------------------------|---------------------------------|
+  | Remove auth headers                | ✅ `filter_request_headers`     |
+  | Redact API keys in URLs            | ✅ `filter_sensitive_data`      |
+  | Redact tokens in JSON              | ✅ `filter_sensitive_data`      |
+  | Complex request normalization      | ✅ `filter_request`             |
+  | Complex response filtering         | ✅ `filter_response`            |
 
   ## Usage
 
@@ -110,13 +189,23 @@ defmodule ReqCassette.Filter do
       ReqCassette.with_cassette(
         "api_call",
         [
+          # Regex patterns (fastest)
           filter_sensitive_data: [
             {~r/api_key=[\\w-]+/, "api_key=<REDACTED>"}
           ],
+
+          # Header removal
           filter_request_headers: ["authorization"],
           filter_response_headers: ["set-cookie"],
-          before_record: fn interaction ->
-            put_in(interaction, ["response", "body_json", "secret"], "<REDACTED>")
+
+          # Request filtering (custom logic)
+          filter_request: fn request ->
+            update_in(request, ["body_json", "timestamp"], fn _ -> "<NORMALIZED>" end)
+          end,
+
+          # Response filtering (always safe!)
+          filter_response: fn response ->
+            update_in(response, ["body_json", "secret"], fn _ -> "<REDACTED>" end)
           end
         ],
         fn plug ->
@@ -172,18 +261,39 @@ defmodule ReqCassette.Filter do
       )
       # Tokens in response JSON are redacted
 
-      # Complex filtering with callback
+      # Filter request with custom callback
+      ReqCassette.with_cassette(
+        "normalized_request",
+        [
+          filter_request: fn request ->
+            request
+            # Normalize timestamp for consistent matching
+            |> update_in(["body_json", "timestamp"], fn _ -> "<NORMALIZED>" end)
+            # Redact email in request
+            |> update_in(["body_json", "email"], fn _ -> "user@example.com" end)
+          end
+        ],
+        fn plug ->
+          Req.post!(
+            "https://api.example.com/events",
+            json: %{event: "login", timestamp: DateTime.utc_now(), email: "alice@example.com"},
+            plug: plug
+          )
+        end
+      )
+
+      # Filter response with custom callback
       ReqCassette.with_cassette(
         "user_profile",
         [
-          before_record: fn interaction ->
-            interaction
+          filter_response: fn response ->
+            response
             # Redact email
-            |> update_in(["response", "body_json", "email"], fn _ -> "user@example.com" end)
+            |> update_in(["body_json", "email"], fn _ -> "user@example.com" end)
             # Redact phone
-            |> update_in(["response", "body_json", "phone"], fn _ -> "555-0000" end)
-            # Remove credit card
-            |> update_in(["response", "body_json"], &Map.delete(&1, "credit_card"))
+            |> update_in(["body_json", "phone"], fn _ -> "555-0000" end)
+            # Remove credit card completely
+            |> update_in(["body_json"], &Map.delete(&1, "credit_card"))
           end
         ],
         fn plug ->
@@ -203,9 +313,13 @@ defmodule ReqCassette.Filter do
           # Header filters
           filter_request_headers: ["authorization", "cookie"],
           filter_response_headers: ["set-cookie", "x-api-key"],
-          # Callback for complex logic
-          before_record: fn interaction ->
-            update_in(interaction, ["response", "body_json", "user", "email"], fn _ ->
+          # Request callback for normalization
+          filter_request: fn request ->
+            update_in(request, ["body_json", "timestamp"], fn _ -> "<NORMALIZED>" end)
+          end,
+          # Response callback for redaction
+          filter_response: fn response ->
+            update_in(response, ["body_json", "user", "email"], fn _ ->
               "redacted@example.com"
             end)
           end
@@ -231,9 +345,11 @@ defmodule ReqCassette.Filter do
   - **Commit filtered cassettes** - Always filter before committing to version control
   - **Use regex for patterns** - API keys, tokens, and structured secrets
   - **Use headers for credentials** - Remove Authorization, Cookie headers
-  - **Use callbacks for complex logic** - Nested data structures, conditional filtering
+  - **Use filter_request for request normalization** - Timestamps, IDs, request-specific data
+  - **Use filter_response for response redaction** - Safe and simple for all response filtering
   - **Test your filters** - Manually inspect cassettes after filtering
   - **Document patterns** - Comment your regex patterns for maintainability
+  - **Be cautious with filter_request** - Ensure transformations are idempotent or adjust match_requests_on
 
   ## See Also
 
@@ -248,10 +364,27 @@ defmodule ReqCassette.Filter do
 
   - `interaction` - The cassette interaction map
   - `opts` - Filter options from cassette configuration
+    - `:filter_sensitive_data` - List of `{regex, replacement}` tuples
+    - `:filter_request_headers` - List of header names to remove from requests
+    - `:filter_response_headers` - List of header names to remove from responses
+    - `:filter_request` - Callback function `(request -> request)` for request-only filtering
+    - `:filter_response` - Callback function `(response -> response)` for response-only filtering
+
+  ## Filter Application Order
+
+  1. **Regex filters** - Applied to URI, query string, request body, response body
+  2. **Header filters** - Remove specified request/response headers
+  3. **Request callback** (filter_request) - Transform request
+  4. **Response callback** (filter_response) - Transform response
 
   ## Returns
 
   Filtered interaction map
+
+  ## Note
+
+  This function also supports the advanced `:before_record` option for backward compatibility
+  and special use cases. See `ReqCassette` module documentation for details on when to use it.
   """
   @spec apply_filters(map(), map()) :: map()
   def apply_filters(interaction, opts) do
@@ -261,6 +394,8 @@ defmodule ReqCassette.Filter do
       opts[:filter_request_headers] || [],
       opts[:filter_response_headers] || []
     )
+    |> apply_request_callback(opts[:filter_request])
+    |> apply_response_callback(opts[:filter_response])
     |> apply_callback(opts[:before_record])
   end
 
@@ -362,7 +497,25 @@ defmodule ReqCassette.Filter do
     |> Enum.into(%{})
   end
 
-  # Callback-based filtering
+  # Request-only callback filtering
+  defp apply_request_callback(interaction, nil), do: interaction
+
+  defp apply_request_callback(interaction, callback) when is_function(callback, 1) do
+    update_in(interaction, ["request"], callback)
+  end
+
+  defp apply_request_callback(interaction, _), do: interaction
+
+  # Response-only callback filtering
+  defp apply_response_callback(interaction, nil), do: interaction
+
+  defp apply_response_callback(interaction, callback) when is_function(callback, 1) do
+    update_in(interaction, ["response"], callback)
+  end
+
+  defp apply_response_callback(interaction, _), do: interaction
+
+  # Full interaction callback filtering
   defp apply_callback(interaction, nil), do: interaction
 
   defp apply_callback(interaction, callback) when is_function(callback, 1) do

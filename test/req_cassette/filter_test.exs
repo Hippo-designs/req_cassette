@@ -981,4 +981,638 @@ defmodule ReqCassette.FilterTest do
       assert response3.body["name"] == "Alice"
     end
   end
+
+  describe "filter_request callback" do
+    test "filters request-only fields during recording and replay" do
+      bypass = Bypass.open()
+
+      # Record phase
+      Bypass.expect(bypass, "POST", "/users", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{status: "created"}))
+      end)
+
+      filter_req = fn request ->
+        request
+        |> update_in(["body_json", "email"], fn _ -> "redacted@example.com" end)
+        |> update_in(["body_json", "timestamp"], fn _ -> "<NORMALIZED>" end)
+      end
+
+      cassette_opts = [
+        cassette_dir: @cassette_dir,
+        mode: :record_missing,
+        filter_request: filter_req,
+        match_requests_on: [:method, :uri]
+      ]
+
+      # First call - records
+      response1 =
+        with_cassette(
+          "filter_request_test",
+          cassette_opts,
+          fn plug ->
+            Req.post!(
+              "http://localhost:#{bypass.port}/users",
+              json: %{
+                email: "alice@example.com",
+                timestamp: "2025-10-18T10:00:00Z",
+                name: "Alice"
+              },
+              plug: plug
+            )
+          end
+        )
+
+      assert response1.status == 200
+
+      # Verify cassette was filtered
+      cassette_path = Path.join(@cassette_dir, "filter_request_test.json")
+      {:ok, data} = File.read(cassette_path)
+      {:ok, cassette} = Jason.decode(data)
+
+      interaction = hd(cassette["interactions"])
+      assert interaction["request"]["body_json"]["email"] == "redacted@example.com"
+      assert interaction["request"]["body_json"]["timestamp"] == "<NORMALIZED>"
+      assert interaction["request"]["body_json"]["name"] == "Alice"
+
+      # Shut down bypass
+      Bypass.down(bypass)
+
+      # Second call - should replay
+      response2 =
+        with_cassette(
+          "filter_request_test",
+          cassette_opts,
+          fn plug ->
+            Req.post!(
+              "http://localhost:#{bypass.port}/users",
+              json: %{
+                email: "bob@example.com",
+                timestamp: "2025-10-18T11:00:00Z",
+                name: "Alice"
+              },
+              plug: plug
+            )
+          end
+        )
+
+      assert response2.status == 200
+      assert response2.body["status"] == "created"
+    end
+  end
+
+  describe "filter_response callback" do
+    test "filters response-only fields" do
+      bypass = Bypass.open()
+
+      Bypass.expect_once(bypass, "GET", "/api", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(
+          200,
+          Jason.encode!(%{
+            user: "Alice",
+            secret_token: "xyz123",
+            internal_id: "abc456"
+          })
+        )
+      end)
+
+      filter_resp = fn response ->
+        response
+        |> update_in(["body_json", "secret_token"], fn _ -> "<REDACTED>" end)
+        |> update_in(["body_json", "internal_id"], fn _ -> "<REDACTED>" end)
+      end
+
+      with_cassette(
+        "filter_response_test",
+        [
+          cassette_dir: @cassette_dir,
+          filter_response: filter_resp
+        ],
+        fn plug ->
+          Req.get!("http://localhost:#{bypass.port}/api", plug: plug)
+        end
+      )
+
+      # Verify cassette has filtered response
+      cassette_path = Path.join(@cassette_dir, "filter_response_test.json")
+      {:ok, data} = File.read(cassette_path)
+      {:ok, cassette} = Jason.decode(data)
+
+      interaction = hd(cassette["interactions"])
+      assert interaction["response"]["body_json"]["user"] == "Alice"
+      assert interaction["response"]["body_json"]["secret_token"] == "<REDACTED>"
+      assert interaction["response"]["body_json"]["internal_id"] == "<REDACTED>"
+    end
+  end
+
+  describe "combined new and old callbacks" do
+    test "applies all callback types in correct order" do
+      bypass = Bypass.open()
+
+      Bypass.expect_once(bypass, "POST", "/complete", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{status: "ok", data: "response"}))
+      end)
+
+      filter_req = fn request ->
+        update_in(request, ["body_json", "timestamp"], fn _ -> "<NORMALIZED>" end)
+      end
+
+      filter_resp = fn response ->
+        update_in(response, ["body_json", "data"], fn _ -> "<FILTERED>" end)
+      end
+
+      before_record_fn = fn interaction ->
+        put_in(interaction, ["recorded_at"], "<OVERRIDE>")
+      end
+
+      with_cassette(
+        "combined_callbacks_test",
+        [
+          cassette_dir: @cassette_dir,
+          filter_request: filter_req,
+          filter_response: filter_resp,
+          before_record: before_record_fn,
+          match_requests_on: [:method, :uri]
+        ],
+        fn plug ->
+          Req.post!(
+            "http://localhost:#{bypass.port}/complete",
+            json: %{timestamp: "2025-10-18T10:00:00Z", value: "test"},
+            plug: plug
+          )
+        end
+      )
+
+      # Verify all callbacks were applied in order
+      cassette_path = Path.join(@cassette_dir, "combined_callbacks_test.json")
+      {:ok, data} = File.read(cassette_path)
+      {:ok, cassette} = Jason.decode(data)
+
+      interaction = hd(cassette["interactions"])
+
+      # filter_request was applied
+      assert interaction["request"]["body_json"]["timestamp"] == "<NORMALIZED>"
+      assert interaction["request"]["body_json"]["value"] == "test"
+
+      # filter_response was applied
+      assert interaction["response"]["body_json"]["status"] == "ok"
+      assert interaction["response"]["body_json"]["data"] == "<FILTERED>"
+
+      # before_record was applied last
+      assert interaction["recorded_at"] == "<OVERRIDE>"
+    end
+  end
+
+  describe "filter_response replay behavior" do
+    test "filter_response is NOT re-applied during replay" do
+      bypass = Bypass.open()
+
+      # Record phase - response has original value
+      Bypass.expect_once(bypass, "GET", "/data", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{secret: "ORIGINAL_SECRET", data: "info"}))
+      end)
+
+      filter_resp = fn response ->
+        update_in(response, ["body_json", "secret"], fn _ -> "REDACTED_ONCE" end)
+      end
+
+      cassette_opts = [
+        cassette_dir: @cassette_dir,
+        mode: :record_missing,
+        filter_response: filter_resp
+      ]
+
+      # First call - records with filter applied
+      with_cassette("filter_response_replay_test", cassette_opts, fn plug ->
+        Req.get!("http://localhost:#{bypass.port}/data", plug: plug)
+      end)
+
+      # Verify cassette has filtered value
+      cassette_path = Path.join(@cassette_dir, "filter_response_replay_test.json")
+      {:ok, data} = File.read(cassette_path)
+      {:ok, cassette} = Jason.decode(data)
+      interaction = hd(cassette["interactions"])
+      assert interaction["response"]["body_json"]["secret"] == "REDACTED_ONCE"
+
+      # Shutdown bypass - replay will use cassette
+      Bypass.down(bypass)
+
+      # Second call - replays from cassette
+      # If filter_response were re-applied, it would change "REDACTED_ONCE" to something else
+      # But it should NOT be re-applied, so we should get "REDACTED_ONCE" as-is
+      response2 =
+        with_cassette("filter_response_replay_test", cassette_opts, fn plug ->
+          Req.get!("http://localhost:#{bypass.port}/data", plug: plug)
+        end)
+
+      # Verify filter_response was NOT re-applied during replay
+      assert response2.body["secret"] == "REDACTED_ONCE"
+      assert response2.body["data"] == "info"
+    end
+  end
+
+  describe "filter_request with body matching" do
+    test "replay works when filter_request modifies body and body is used for matching" do
+      bypass = Bypass.open()
+
+      # Record phase
+      Bypass.expect_once(bypass, "POST", "/events", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{status: "recorded"}))
+      end)
+
+      filter_req = fn request ->
+        request
+        # Normalize timestamp - idempotent transformation
+        |> update_in(["body_json", "timestamp"], fn _ -> "<NORMALIZED>" end)
+      end
+
+      cassette_opts = [
+        cassette_dir: @cassette_dir,
+        mode: :record_missing,
+        filter_request: filter_req,
+        # Include body in matching
+        match_requests_on: [:method, :uri, :body]
+      ]
+
+      # First call - records
+      response1 =
+        with_cassette("filter_request_body_match_test", cassette_opts, fn plug ->
+          Req.post!(
+            "http://localhost:#{bypass.port}/events",
+            json: %{event: "login", timestamp: "2025-10-18T10:00:00Z"},
+            plug: plug
+          )
+        end)
+
+      assert response1.status == 200
+
+      # Shutdown bypass
+      Bypass.down(bypass)
+
+      # Second call with DIFFERENT timestamp - should still match because filter normalizes it
+      response2 =
+        with_cassette("filter_request_body_match_test", cassette_opts, fn plug ->
+          Req.post!(
+            "http://localhost:#{bypass.port}/events",
+            json: %{event: "login", timestamp: "2025-10-18T11:30:00Z"},
+            plug: plug
+          )
+        end)
+
+      # Should successfully replay because both timestamps normalize to "<NORMALIZED>"
+      assert response2.status == 200
+      assert response2.body["status"] == "recorded"
+    end
+  end
+
+  describe "filter_request + filter_sensitive_data integration" do
+    test "applies both regex and callback filters to request" do
+      bypass = Bypass.open()
+
+      Bypass.expect_once(bypass, "POST", "/api", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{result: "ok"}))
+      end)
+
+      filter_req = fn request ->
+        # Callback filter normalizes timestamp
+        update_in(request, ["body_json", "timestamp"], fn _ -> "<NORMALIZED>" end)
+      end
+
+      cassette_opts = [
+        cassette_dir: @cassette_dir,
+        filter_sensitive_data: [
+          # Regex filter redacts email
+          {~r/"email":"[^"]+"/, ~s("email":"<REDACTED>")}
+        ],
+        filter_request: filter_req
+      ]
+
+      with_cassette("filter_request_regex_test", cassette_opts, fn plug ->
+        Req.post!(
+          "http://localhost:#{bypass.port}/api",
+          json: %{email: "alice@example.com", timestamp: "2025-10-18T10:00:00Z", data: "test"},
+          plug: plug
+        )
+      end)
+
+      # Verify both filters were applied
+      cassette_path = Path.join(@cassette_dir, "filter_request_regex_test.json")
+      {:ok, data} = File.read(cassette_path)
+      {:ok, cassette} = Jason.decode(data)
+      interaction = hd(cassette["interactions"])
+
+      # Regex filter applied first
+      assert interaction["request"]["body_json"]["email"] == "<REDACTED>"
+      # Callback filter applied after
+      assert interaction["request"]["body_json"]["timestamp"] == "<NORMALIZED>"
+      # Unfiltered field preserved
+      assert interaction["request"]["body_json"]["data"] == "test"
+    end
+  end
+
+  describe "filter_response + filter_sensitive_data integration" do
+    test "applies both regex and callback filters to response" do
+      bypass = Bypass.open()
+
+      Bypass.expect_once(bypass, "GET", "/user", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(
+          200,
+          Jason.encode!(%{
+            user: "Alice",
+            api_key: "sk-secret123",
+            internal_id: "abc456",
+            public_data: "visible"
+          })
+        )
+      end)
+
+      filter_resp = fn response ->
+        # Callback filter redacts internal_id
+        update_in(response, ["body_json", "internal_id"], fn _ -> "<REDACTED_ID>" end)
+      end
+
+      cassette_opts = [
+        cassette_dir: @cassette_dir,
+        filter_sensitive_data: [
+          # Regex filter redacts api_key
+          {~r/"api_key":"[^"]+"/, ~s("api_key":"<REDACTED_KEY>")}
+        ],
+        filter_response: filter_resp
+      ]
+
+      with_cassette("filter_response_regex_test", cassette_opts, fn plug ->
+        Req.get!("http://localhost:#{bypass.port}/user", plug: plug)
+      end)
+
+      # Verify both filters were applied
+      cassette_path = Path.join(@cassette_dir, "filter_response_regex_test.json")
+      {:ok, data} = File.read(cassette_path)
+      {:ok, cassette} = Jason.decode(data)
+      interaction = hd(cassette["interactions"])
+
+      # Regex filter applied first
+      assert interaction["response"]["body_json"]["api_key"] == "<REDACTED_KEY>"
+      # Callback filter applied after
+      assert interaction["response"]["body_json"]["internal_id"] == "<REDACTED_ID>"
+      # Unfiltered fields preserved
+      assert interaction["response"]["body_json"]["user"] == "Alice"
+      assert interaction["response"]["body_json"]["public_data"] == "visible"
+    end
+  end
+
+  describe "filter_request + filter_request_headers integration" do
+    test "applies both header and callback filters to request" do
+      bypass = Bypass.open()
+
+      Bypass.expect_once(bypass, "POST", "/secure", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{success: true}))
+      end)
+
+      filter_req = fn request ->
+        update_in(request, ["body_json", "user_id"], fn _ -> "<NORMALIZED_USER>" end)
+      end
+
+      cassette_opts = [
+        cassette_dir: @cassette_dir,
+        filter_request_headers: ["authorization", "x-api-key"],
+        filter_request: filter_req
+      ]
+
+      with_cassette("filter_request_headers_callback_test", cassette_opts, fn plug ->
+        Req.post!(
+          "http://localhost:#{bypass.port}/secure",
+          json: %{user_id: "user_12345", action: "delete"},
+          headers: [{"authorization", "Bearer secret"}, {"x-api-key", "key123"}],
+          plug: plug
+        )
+      end)
+
+      # Verify both filters were applied
+      cassette_path = Path.join(@cassette_dir, "filter_request_headers_callback_test.json")
+      {:ok, data} = File.read(cassette_path)
+      {:ok, cassette} = Jason.decode(data)
+      interaction = hd(cassette["interactions"])
+
+      # Header filters applied
+      refute Map.has_key?(interaction["request"]["headers"], "authorization")
+      refute Map.has_key?(interaction["request"]["headers"], "x-api-key")
+
+      # Callback filter applied
+      assert interaction["request"]["body_json"]["user_id"] == "<NORMALIZED_USER>"
+      assert interaction["request"]["body_json"]["action"] == "delete"
+    end
+  end
+
+  describe "filter_response + filter_response_headers integration" do
+    test "applies both header and callback filters to response" do
+      bypass = Bypass.open()
+
+      Bypass.expect_once(bypass, "GET", "/login", fn conn ->
+        conn
+        |> Conn.put_resp_header("set-cookie", "session=abc123")
+        |> Conn.put_resp_header("x-internal-token", "token456")
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{session_id: "xyz789", user: "Alice"}))
+      end)
+
+      filter_resp = fn response ->
+        update_in(response, ["body_json", "session_id"], fn _ -> "<REDACTED_SESSION>" end)
+      end
+
+      cassette_opts = [
+        cassette_dir: @cassette_dir,
+        filter_response_headers: ["set-cookie", "x-internal-token"],
+        filter_response: filter_resp
+      ]
+
+      with_cassette("filter_response_headers_callback_test", cassette_opts, fn plug ->
+        Req.get!("http://localhost:#{bypass.port}/login", plug: plug)
+      end)
+
+      # Verify both filters were applied
+      cassette_path = Path.join(@cassette_dir, "filter_response_headers_callback_test.json")
+      {:ok, data} = File.read(cassette_path)
+      {:ok, cassette} = Jason.decode(data)
+      interaction = hd(cassette["interactions"])
+
+      # Header filters applied
+      refute Map.has_key?(interaction["response"]["headers"], "set-cookie")
+      refute Map.has_key?(interaction["response"]["headers"], "x-internal-token")
+
+      # Callback filter applied
+      assert interaction["response"]["body_json"]["session_id"] == "<REDACTED_SESSION>"
+      assert interaction["response"]["body_json"]["user"] == "Alice"
+    end
+  end
+
+  describe "filter_request with text body" do
+    test "filters text request bodies" do
+      bypass = Bypass.open()
+
+      Bypass.expect_once(bypass, "POST", "/webhook", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("text/plain")
+        |> Conn.resp(200, "OK")
+      end)
+
+      filter_req = fn request ->
+        # Modify text body
+        case request["body_type"] do
+          "text" ->
+            update_in(request, ["body"], fn body ->
+              String.replace(body, "12345", "<REDACTED_ID>")
+            end)
+
+          _ ->
+            request
+        end
+      end
+
+      cassette_opts = [
+        cassette_dir: @cassette_dir,
+        filter_request: filter_req
+      ]
+
+      with_cassette("filter_request_text_body_test", cassette_opts, fn plug ->
+        Req.post!(
+          "http://localhost:#{bypass.port}/webhook",
+          body: "user_id=12345&action=update",
+          headers: [{"content-type", "text/plain"}],
+          plug: plug
+        )
+      end)
+
+      # Verify text body was filtered
+      cassette_path = Path.join(@cassette_dir, "filter_request_text_body_test.json")
+      {:ok, data} = File.read(cassette_path)
+      {:ok, cassette} = Jason.decode(data)
+      interaction = hd(cassette["interactions"])
+
+      assert interaction["request"]["body_type"] == "text"
+      assert interaction["request"]["body"] == "user_id=<REDACTED_ID>&action=update"
+    end
+  end
+
+  describe "filter_response with text body" do
+    test "filters text response bodies" do
+      bypass = Bypass.open()
+
+      Bypass.expect_once(bypass, "GET", "/report", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("text/csv")
+        |> Conn.resp(
+          200,
+          "name,email,id\nAlice,alice@example.com,12345\nBob,bob@example.com,67890"
+        )
+      end)
+
+      filter_resp = fn response ->
+        case response["body_type"] do
+          "text" ->
+            update_in(response, ["body"], fn body ->
+              body
+              |> String.replace(~r/[\w.+-]+@[\w.-]+\.\w+/, "<REDACTED_EMAIL>")
+              |> String.replace(~r/\d{5}/, "<REDACTED_ID>")
+            end)
+
+          _ ->
+            response
+        end
+      end
+
+      cassette_opts = [
+        cassette_dir: @cassette_dir,
+        filter_response: filter_resp
+      ]
+
+      with_cassette("filter_response_text_body_test", cassette_opts, fn plug ->
+        Req.get!("http://localhost:#{bypass.port}/report", plug: plug)
+      end)
+
+      # Verify text body was filtered
+      cassette_path = Path.join(@cassette_dir, "filter_response_text_body_test.json")
+      {:ok, data} = File.read(cassette_path)
+      {:ok, cassette} = Jason.decode(data)
+      interaction = hd(cassette["interactions"])
+
+      assert interaction["response"]["body_type"] == "text"
+
+      assert interaction["response"]["body"] ==
+               "name,email,id\nAlice,<REDACTED_EMAIL>,<REDACTED_ID>\nBob,<REDACTED_EMAIL>,<REDACTED_ID>"
+    end
+  end
+
+  describe "filter_request modifying headers used for matching" do
+    test "replay fails when filter_request modifies headers and headers are used for matching" do
+      bypass = Bypass.open()
+
+      # Record phase
+      Bypass.expect_once(bypass, "GET", "/api", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{data: "response"}))
+      end)
+
+      # This is a BAD pattern - modifying headers that are used for matching
+      filter_req = fn request ->
+        put_in(request, ["headers", "x-custom-id"], ["<NORMALIZED>"])
+      end
+
+      cassette_opts = [
+        cassette_dir: @cassette_dir,
+        mode: :record_missing,
+        filter_request: filter_req,
+        # Headers are used for matching
+        match_requests_on: [:method, :uri, :headers]
+      ]
+
+      # First call - records with normalized header
+      with_cassette("filter_request_header_match_test", cassette_opts, fn plug ->
+        Req.get!(
+          "http://localhost:#{bypass.port}/api",
+          headers: [{"x-custom-id", "original-123"}],
+          plug: plug
+        )
+      end)
+
+      # Verify cassette has normalized header
+      cassette_path = Path.join(@cassette_dir, "filter_request_header_match_test.json")
+      {:ok, data} = File.read(cassette_path)
+      {:ok, cassette} = Jason.decode(data)
+      interaction = hd(cassette["interactions"])
+      assert interaction["request"]["headers"]["x-custom-id"] == ["<NORMALIZED>"]
+
+      # Shutdown bypass
+      Bypass.down(bypass)
+
+      # Second call with different header value - SHOULD match because filter normalizes it
+      response2 =
+        with_cassette("filter_request_header_match_test", cassette_opts, fn plug ->
+          Req.get!(
+            "http://localhost:#{bypass.port}/api",
+            headers: [{"x-custom-id", "different-456"}],
+            plug: plug
+          )
+        end)
+
+      # Should successfully replay because both headers normalize to "<NORMALIZED>"
+      assert response2.status == 200
+      assert response2.body["data"] == "response"
+    end
+  end
 end

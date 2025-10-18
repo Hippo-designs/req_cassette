@@ -565,7 +565,9 @@ defmodule ReqCassette.Plug do
     %{
       filter_sensitive_data: opts[:filter_sensitive_data] || [],
       filter_request_headers: opts[:filter_request_headers] || [],
-      filter_response_headers: opts[:filter_response_headers] || []
+      filter_response_headers: opts[:filter_response_headers] || [],
+      filter_request: opts[:filter_request],
+      filter_response: opts[:filter_response]
     }
   end
 
