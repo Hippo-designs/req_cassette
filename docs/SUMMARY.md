@@ -38,6 +38,7 @@ req_cassette/
 │   └── req_llm.livemd           # Interactive demo
 └── docs/
     ├── REQ_LLM_INTEGRATION.md   # ReqLLM usage guide
+    ├── SENSITIVE_DATA_FILTERING.md  # Comprehensive filtering guide
     └── SUMMARY.md               # This file
 ```
 

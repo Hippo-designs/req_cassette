@@ -477,22 +477,27 @@ with_cassette "create",
 
 ### 3. Sensitive Data Filtering
 
-Redact secrets before committing cassettes:
+**⚠️ Critical for LLM APIs:** Always filter authorization headers to prevent API
+keys from being committed.
 
 ```elixir
 with_cassette "auth",
   [
+    filter_request_headers: ["authorization", "x-api-key", "cookie"],
+    filter_response_headers: ["set-cookie"],
     filter_sensitive_data: [
       {~r/api_key=[\w-]+/, "api_key=<REDACTED>"},
       {~r/"token":"[^"]+"/, ~s("token":"<REDACTED>")}
-    ],
-    filter_request_headers: ["authorization"],
-    filter_response_headers: ["set-cookie"]
+    ]
   ],
   fn plug ->
     Req.get!("https://api.example.com/data?api_key=secret", plug: plug)
   end
 ```
+
+**📖 See the [Sensitive Data Filtering Guide](SENSITIVE_DATA_FILTERING.md)** for
+comprehensive documentation on protecting secrets, common patterns, and best
+practices.
 
 ### 4. Multiple Interactions Per Cassette
 

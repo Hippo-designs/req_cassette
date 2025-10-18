@@ -238,7 +238,8 @@ defmodule ReqCassette.AgentReplayTest do
       cassette_opts_record = %{
         cassette_dir: @cassette_dir,
         cassette_name: "agent_single_prompt",
-        mode: :record_missing
+        mode: :record_missing,
+        filter_request_headers: ["authorization", "x-api-key", "cookie"]
       }
 
       cassette_opts_replay = %{
@@ -292,7 +293,8 @@ defmodule ReqCassette.AgentReplayTest do
       cassette_opts_record = %{
         cassette_dir: @cassette_dir,
         cassette_name: "agent_multiple_prompts",
-        mode: :record_missing
+        mode: :record_missing,
+        filter_request_headers: ["authorization", "x-api-key", "cookie"]
       }
 
       cassette_opts_replay = %{

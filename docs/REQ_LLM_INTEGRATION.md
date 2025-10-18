@@ -42,7 +42,12 @@ prompt = "Explain recursion in one sentence"
   prompt,
   max_tokens: 100,
   req_http_options: [
-    plug: {ReqCassette.Plug, %{cassette_name: "llm_example", cassette_dir: "test/cassettes", mode: :record_missing}}
+    plug: {ReqCassette.Plug, %{
+      cassette_name: "llm_example",
+      cassette_dir: "test/cassettes",
+      mode: :record_missing,
+      filter_request_headers: ["authorization", "x-api-key", "cookie"]
+    }}
   ]
 )
 
@@ -52,7 +57,12 @@ prompt = "Explain recursion in one sentence"
   prompt,
   max_tokens: 100,
   req_http_options: [
-    plug: {ReqCassette.Plug, %{cassette_name: "llm_example", cassette_dir: "test/cassettes", mode: :record_missing}}
+    plug: {ReqCassette.Plug, %{
+      cassette_name: "llm_example",
+      cassette_dir: "test/cassettes",
+      mode: :record_missing,
+      filter_request_headers: ["authorization", "x-api-key", "cookie"]
+    }}
   ]
 )
 
@@ -81,7 +91,12 @@ defmodule MyApp.LLMTest do
       "Explain what Elixir's pipe operator does",
       max_tokens: 150,
       req_http_options: [
-        plug: {ReqCassette.Plug, %{cassette_name: "pipe_explanation", cassette_dir: @cassette_dir, mode: :record_missing}}
+        plug: {ReqCassette.Plug, %{
+          cassette_name: "pipe_explanation",
+          cassette_dir: @cassette_dir,
+          mode: :record_missing,
+          filter_request_headers: ["authorization", "x-api-key", "cookie"]
+        }}
       ]
     )
 
@@ -91,6 +106,66 @@ defmodule MyApp.LLMTest do
   end
 end
 ```
+
+## 🔒 Protecting API Keys
+
+**Critical:** LLM APIs use Authorization headers containing sensitive API keys.
+Always filter these headers to prevent secrets from being saved to cassettes.
+
+### Why It's Important
+
+```elixir
+# ❌ WITHOUT FILTERING - API key saved to cassette!
+with_cassette "llm_test", fn plug ->
+  ReqLLM.generate_text("anthropic:claude-sonnet-4-20250514", "Hello", req_http_options: [plug: plug])
+end
+
+# Cassette file contains:
+# "headers": {
+#   "authorization": ["Bearer sk-ant-api03-YOUR_SECRET_KEY_HERE"]
+# }
+# ⚠️ If committed to git, your API key is exposed!
+```
+
+### The Solution
+
+Always include `filter_request_headers` in your cassette options:
+
+```elixir
+# ✅ WITH FILTERING - API key protected!
+with_cassette "llm_test",
+  [filter_request_headers: ["authorization", "x-api-key", "cookie"]],
+  fn plug ->
+    ReqLLM.generate_text("anthropic:claude-sonnet-4-20250514", "Hello", req_http_options: [plug: plug])
+  end
+
+# Cassette does NOT contain authorization header ✅
+```
+
+### Recommended Pattern
+
+```elixir
+@cassette_opts [
+  cassette_dir: "test/cassettes",
+  mode: :record_missing,
+  filter_request_headers: ["authorization", "x-api-key", "cookie"]
+]
+
+test "LLM generation" do
+  with_cassette "llm_test", @cassette_opts, fn plug ->
+    {:ok, response} = ReqLLM.generate_text(
+      "anthropic:claude-sonnet-4-20250514",
+      "Explain Elixir",
+      req_http_options: [plug: plug]
+    )
+    assert response.choices[0].message.content =~ "Elixir"
+  end
+end
+```
+
+**📖 For complete documentation** on protecting sensitive data, common patterns,
+and best practices, see the
+[Sensitive Data Filtering Guide](SENSITIVE_DATA_FILTERING.md).
 
 ## ⚠️ Critical for Agents: Recording Mode Selection
 
@@ -307,7 +382,8 @@ supports both tool calling and cassette recording/replay:
   cassette_opts: [
     cassette_name: "my_agent",
     cassette_dir: "agent_cassettes",
-    mode: :record_missing  # ✅ Critical for agents!
+    mode: :record_missing,  # ✅ Critical for agents!
+    filter_request_headers: ["authorization", "x-api-key", "cookie"]
   ]
 )
 

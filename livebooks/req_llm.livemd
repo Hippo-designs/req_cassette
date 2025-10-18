@@ -64,7 +64,12 @@ prompt = "Write a short poem about Elixir programming language"
     max_tokens: 100,
     req_http_options: [
       plug:
-        {ReqCassette.Plug, %{cassette_dir: cassette_dir, cassette_name: "test1", mode: :record}}
+        {ReqCassette.Plug, %{
+          cassette_dir: cassette_dir,
+          cassette_name: "test1",
+          mode: :record,
+          filter_request_headers: ["authorization", "x-api-key", "cookie"]
+        }}
     ]
   )
 
@@ -81,7 +86,12 @@ IO.puts("First call:\n#{text1}\n")
     max_tokens: 100,
     req_http_options: [
       plug:
-        {ReqCassette.Plug, %{cassette_dir: cassette_dir, cassette_name: "test1", mode: :replay}}
+        {ReqCassette.Plug, %{
+          cassette_dir: cassette_dir,
+          cassette_name: "test1",
+          mode: :replay,
+          filter_request_headers: ["authorization", "x-api-key", "cookie"]
+        }}
     ]
   )
 
@@ -375,7 +385,8 @@ IO.puts("Agent cassettes created: #{length(agent_cassettes)}")
     cassette_opts: [
       cassette_dir: agent_cassette_dir,
       cassette_name: "agent",
-      mode: :record_missing
+      mode: :record_missing,
+      filter_request_headers: ["authorization", "x-api-key", "cookie"]
     ]
   )
 
@@ -385,7 +396,8 @@ IO.puts("Agent cassettes created: #{length(agent_cassettes)}")
     cassette_opts: [
       cassette_dir: agent_cassette_dir,
       cassette_name: "agent",
-      mode: :record_missing
+      mode: :record_missing,
+      filter_request_headers: ["authorization", "x-api-key", "cookie"]
     ]
   )
 

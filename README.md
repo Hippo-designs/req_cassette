@@ -148,12 +148,12 @@ end
 
 ### Sensitive Data Filtering
 
-Protect API keys, tokens, and sensitive data:
+**⚠️ Critical for LLM APIs:** Always filter authorization headers to prevent API keys from being saved to cassettes.
 
 ```elixir
 with_cassette "auth",
   [
-    filter_request_headers: ["authorization", "x-api-key"],
+    filter_request_headers: ["authorization", "x-api-key", "cookie"],
     filter_response_headers: ["set-cookie"],
     filter_sensitive_data: [
       {~r/api_key=[\w-]+/, "api_key=<REDACTED>"},
@@ -166,6 +166,8 @@ with_cassette "auth",
       plug: plug)
   end
 ```
+
+**📖 See the [Sensitive Data Filtering Guide](docs/SENSITIVE_DATA_FILTERING.md)** for comprehensive documentation on protecting secrets, common patterns, and best practices.
 
 ### Custom Request Matching
 
