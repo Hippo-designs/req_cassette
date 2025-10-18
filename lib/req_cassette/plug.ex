@@ -473,8 +473,9 @@ defmodule ReqCassette.Plug do
     case Cassette.load(path) do
       {:ok, cassette} ->
         match_on = opts[:match_requests_on] || [:method, :uri, :query, :headers, :body]
+        filter_opts = extract_filter_opts(opts)
 
-        case Cassette.find_interaction(cassette, conn, body, match_on) do
+        case Cassette.find_interaction(cassette, conn, body, match_on, filter_opts) do
           {:ok, response} ->
             conn
             |> put_resp_headers(response["headers"])
@@ -525,8 +526,9 @@ defmodule ReqCassette.Plug do
       {:ok, cassette} ->
         # Cassette exists - try to find matching interaction
         match_on = opts[:match_requests_on] || [:method, :uri, :query, :headers, :body]
+        filter_opts = extract_filter_opts(opts)
 
-        case Cassette.find_interaction(cassette, conn, body, match_on) do
+        case Cassette.find_interaction(cassette, conn, body, match_on, filter_opts) do
           {:ok, response} ->
             # Found matching interaction - replay it
             conn
@@ -557,6 +559,14 @@ defmodule ReqCassette.Plug do
 
         resp_to_conn(conn, resp)
     end
+  end
+
+  defp extract_filter_opts(opts) do
+    %{
+      filter_sensitive_data: opts[:filter_sensitive_data] || [],
+      filter_request_headers: opts[:filter_request_headers] || [],
+      filter_response_headers: opts[:filter_response_headers] || []
+    }
   end
 
   defp cassette_path(opts) do

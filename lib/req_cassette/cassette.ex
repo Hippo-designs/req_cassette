@@ -360,13 +360,13 @@ defmodule ReqCassette.Cassette do
       find_interaction(cassette, conn_post, post_body, [:method, :uri, :body])
       #=> {:ok, resp_post}
   """
-  @spec find_interaction(map(), Plug.Conn.t(), binary(), [atom()]) ::
+  @spec find_interaction(map(), Plug.Conn.t(), binary(), [atom()], map()) ::
           {:ok, map()} | :not_found
-  def find_interaction(cassette, conn, request_body, match_on) do
+  def find_interaction(cassette, conn, request_body, match_on, filter_opts \\ %{}) do
     interactions = Map.get(cassette, "interactions", [])
 
     Enum.find_value(interactions, :not_found, fn interaction ->
-      if interaction_matches?(interaction, conn, request_body, match_on) do
+      if interaction_matches?(interaction, conn, request_body, match_on, filter_opts) do
         {:ok, interaction["response"]}
       end
     end)
@@ -479,7 +479,7 @@ defmodule ReqCassette.Cassette do
     end)
   end
 
-  defp interaction_matches?(interaction, conn, request_body, match_on) do
+  defp interaction_matches?(interaction, conn, request_body, match_on, filter_opts) do
     request = interaction["request"]
 
     Enum.all?(match_on, fn matcher ->
@@ -488,23 +488,69 @@ defmodule ReqCassette.Cassette do
           String.upcase(request["method"]) == String.upcase(conn.method)
 
         :uri ->
-          request["uri"] == build_uri(conn)
+          # Apply regex filters to incoming URI for comparison
+          incoming_uri = build_uri(conn)
+
+          filtered_incoming_uri =
+            apply_regex_filters_to_string(incoming_uri, filter_opts[:filter_sensitive_data] || [])
+
+          filtered_incoming_uri == request["uri"]
 
         :query ->
-          normalize_query(request["query_string"]) == normalize_query(conn.query_string)
+          # Apply regex filters to query string
+          incoming_query = conn.query_string
+
+          filtered_incoming_query =
+            apply_regex_filters_to_string(
+              incoming_query,
+              filter_opts[:filter_sensitive_data] || []
+            )
+
+          normalize_query(request["query_string"]) == normalize_query(filtered_incoming_query)
 
         :headers ->
-          normalize_headers(request["headers"]) == normalize_headers(conn.req_headers)
+          # Apply header filters to incoming headers before comparing
+          filtered_incoming_headers =
+            apply_header_filters(conn.req_headers, filter_opts[:filter_request_headers] || [])
+
+          normalize_headers(request["headers"]) == normalize_headers(filtered_incoming_headers)
 
         :body ->
           # For JSON bodies, compare normalized JSON
           # For other bodies, compare as strings
-          bodies_match?(request, request_body, conn.req_headers)
+          # Apply filters to incoming body before comparing
+          filtered_body =
+            apply_regex_filters_to_string(request_body, filter_opts[:filter_sensitive_data] || [])
+
+          bodies_match?(request, filtered_body, conn.req_headers)
 
         _ ->
           true
       end
     end)
+  end
+
+  defp apply_regex_filters_to_string(string, []), do: string
+
+  defp apply_regex_filters_to_string(string, patterns) do
+    Enum.reduce(patterns, string, fn {pattern, replacement}, acc ->
+      String.replace(acc, pattern, replacement)
+    end)
+  end
+
+  defp apply_header_filters(headers, []), do: headers
+
+  defp apply_header_filters(headers, filter_list) do
+    headers_map = headers_to_map(headers)
+    filter_list_normalized = Enum.map(filter_list, &String.downcase/1)
+
+    filtered_map =
+      Enum.reject(headers_map, fn {key, _value} ->
+        String.downcase(key) in filter_list_normalized
+      end)
+      |> Enum.into(%{})
+
+    Map.to_list(filtered_map)
   end
 
   defp bodies_match?(request, conn_body, conn_headers) do

@@ -411,4 +411,574 @@ defmodule ReqCassette.FilterTest do
       assert decoded_blob =~ "embedded inside"
     end
   end
+
+  describe "replay after filtering" do
+    test "replay works after filtering request headers" do
+      bypass = Bypass.open()
+
+      # Record phase - expect network call
+      Bypass.expect(bypass, "GET", "/api", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{data: "ok"}))
+      end)
+
+      cassette_opts = [
+        cassette_dir: @cassette_dir,
+        mode: :record_missing,
+        filter_request_headers: ["authorization", "x-api-key"]
+      ]
+
+      # First call with auth header - records to cassette
+      response1 =
+        with_cassette(
+          "filtered_replay",
+          cassette_opts,
+          fn plug ->
+            Req.get!(
+              "http://localhost:#{bypass.port}/api",
+              headers: [{"authorization", "Bearer secret123"}],
+              plug: plug
+            )
+          end
+        )
+
+      assert response1.status == 200
+      assert response1.body["data"] == "ok"
+
+      # Verify cassette was created without authorization header
+      cassette_path = Path.join(@cassette_dir, "filtered_replay.json")
+      {:ok, data} = File.read(cassette_path)
+      refute String.contains?(data, "authorization")
+      refute String.contains?(data, "secret123")
+
+      # Shut down bypass to ensure no network call on replay
+      Bypass.down(bypass)
+
+      # Second call with same auth header - should replay from cassette
+      response2 =
+        with_cassette(
+          "filtered_replay",
+          cassette_opts,
+          fn plug ->
+            Req.get!(
+              "http://localhost:#{bypass.port}/api",
+              headers: [{"authorization", "Bearer secret123"}],
+              plug: plug
+            )
+          end
+        )
+
+      # Should get same response from cassette
+      assert response2.status == 200
+      assert response2.body["data"] == "ok"
+
+      # Third call with strict replay mode - ensures filtering works in CI
+      replay_opts = Keyword.put(cassette_opts, :mode, :replay)
+
+      response3 =
+        with_cassette(
+          "filtered_replay",
+          replay_opts,
+          fn plug ->
+            Req.get!(
+              "http://localhost:#{bypass.port}/api",
+              headers: [{"authorization", "Bearer secret123"}],
+              plug: plug
+            )
+          end
+        )
+
+      # Should get same response from cassette even in strict replay mode
+      assert response3.status == 200
+      assert response3.body["data"] == "ok"
+    end
+
+    test "replay works with regex filters on query params" do
+      bypass = Bypass.open()
+
+      # Record phase
+      Bypass.expect(bypass, "GET", "/api", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{result: "success"}))
+      end)
+
+      cassette_opts = [
+        cassette_dir: @cassette_dir,
+        mode: :record_missing,
+        filter_sensitive_data: [
+          {~r/api_key=[\w-]+/, "api_key=<REDACTED>"}
+        ]
+      ]
+
+      # First call with API key in query string
+      response1 =
+        with_cassette(
+          "regex_replay",
+          cassette_opts,
+          fn plug ->
+            Req.get!(
+              "http://localhost:#{bypass.port}/api?api_key=secret123",
+              plug: plug
+            )
+          end
+        )
+
+      assert response1.status == 200
+      assert response1.body["result"] == "success"
+
+      # Verify cassette was created with redacted API key
+      cassette_path = Path.join(@cassette_dir, "regex_replay.json")
+      {:ok, data} = File.read(cassette_path)
+      refute String.contains?(data, "secret123")
+      assert String.contains?(data, "api_key=<REDACTED>")
+
+      # Shut down bypass
+      Bypass.down(bypass)
+
+      # Second call with same API key - should replay from cassette
+      response2 =
+        with_cassette(
+          "regex_replay",
+          cassette_opts,
+          fn plug ->
+            Req.get!(
+              "http://localhost:#{bypass.port}/api?api_key=secret123",
+              plug: plug
+            )
+          end
+        )
+
+      # Should get same response from cassette
+      assert response2.status == 200
+      assert response2.body["result"] == "success"
+
+      # Third call with strict replay mode - ensures filtering works in CI
+      replay_opts = Keyword.put(cassette_opts, :mode, :replay)
+
+      response3 =
+        with_cassette(
+          "regex_replay",
+          replay_opts,
+          fn plug ->
+            Req.get!(
+              "http://localhost:#{bypass.port}/api?api_key=secret123",
+              plug: plug
+            )
+          end
+        )
+
+      # Should get same response from cassette even in strict replay mode
+      assert response3.status == 200
+      assert response3.body["result"] == "success"
+    end
+
+    test "replay works with combined filters" do
+      bypass = Bypass.open()
+
+      # Record phase
+      Bypass.expect(bypass, "POST", "/complete", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{status: "ok"}))
+      end)
+
+      cassette_opts = [
+        cassette_dir: @cassette_dir,
+        mode: :record_missing,
+        filter_sensitive_data: [
+          {~r/token=[\w-]+/, "token=<REDACTED>"}
+        ],
+        filter_request_headers: ["authorization", "x-api-key"]
+      ]
+
+      # First call with both filters applied
+      response1 =
+        with_cassette(
+          "combined_replay",
+          cassette_opts,
+          fn plug ->
+            Req.post!(
+              "http://localhost:#{bypass.port}/complete?token=secret456",
+              headers: [
+                {"authorization", "Bearer xyz"},
+                {"x-api-key", "key123"}
+              ],
+              plug: plug
+            )
+          end
+        )
+
+      assert response1.status == 200
+
+      # Verify cassette was created with filters applied
+      cassette_path = Path.join(@cassette_dir, "combined_replay.json")
+      {:ok, data} = File.read(cassette_path)
+      refute String.contains?(data, "secret456")
+      refute String.contains?(data, "Bearer xyz")
+      refute String.contains?(data, "key123")
+
+      # Shut down bypass
+      Bypass.down(bypass)
+
+      # Second call - should replay from cassette despite having filtered values
+      response2 =
+        with_cassette(
+          "combined_replay",
+          cassette_opts,
+          fn plug ->
+            Req.post!(
+              "http://localhost:#{bypass.port}/complete?token=secret456",
+              headers: [
+                {"authorization", "Bearer xyz"},
+                {"x-api-key", "key123"}
+              ],
+              plug: plug
+            )
+          end
+        )
+
+      # Should get same response from cassette
+      assert response2.status == 200
+      assert response2.body["status"] == "ok"
+
+      # Third call with strict replay mode - ensures filtering works in CI
+      replay_opts = Keyword.put(cassette_opts, :mode, :replay)
+
+      response3 =
+        with_cassette(
+          "combined_replay",
+          replay_opts,
+          fn plug ->
+            Req.post!(
+              "http://localhost:#{bypass.port}/complete?token=secret456",
+              headers: [
+                {"authorization", "Bearer xyz"},
+                {"x-api-key", "key123"}
+              ],
+              plug: plug
+            )
+          end
+        )
+
+      # Should get same response from cassette even in strict replay mode
+      assert response3.status == 200
+      assert response3.body["status"] == "ok"
+    end
+
+    test "replay works with regex filters on JSON request body" do
+      bypass = Bypass.open()
+
+      # Record phase - server echoes back the request body
+      Bypass.expect(bypass, "POST", "/authenticate", fn conn ->
+        {:ok, body, conn} = Conn.read_body(conn)
+        request_data = Jason.decode!(body)
+
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(
+          200,
+          Jason.encode!(%{
+            authenticated: true,
+            user: request_data["username"]
+          })
+        )
+      end)
+
+      cassette_opts = [
+        cassette_dir: @cassette_dir,
+        mode: :record_missing,
+        filter_sensitive_data: [
+          # Filter password in JSON request body
+          {~r/"password":"[^"]+"/, ~s("password":"<REDACTED>")},
+          {~r/"api_key":"[^"]+"/, ~s("api_key":"<REDACTED>")}
+        ]
+      ]
+
+      # First call with sensitive data in request body
+      response1 =
+        with_cassette(
+          "json_body_replay",
+          cassette_opts,
+          fn plug ->
+            Req.post!(
+              "http://localhost:#{bypass.port}/authenticate",
+              json: %{
+                username: "alice",
+                password: "secret123",
+                api_key: "key-xyz-789"
+              },
+              plug: plug
+            )
+          end
+        )
+
+      assert response1.status == 200
+      assert response1.body["authenticated"] == true
+      assert response1.body["user"] == "alice"
+
+      # Verify cassette was created with filtered request body
+      cassette_path = Path.join(@cassette_dir, "json_body_replay.json")
+      {:ok, data} = File.read(cassette_path)
+      {:ok, cassette} = Jason.decode(data)
+
+      refute String.contains?(data, "secret123")
+      refute String.contains?(data, "key-xyz-789")
+
+      # Check that values are redacted in the JSON structure
+      interaction = hd(cassette["interactions"])
+      assert interaction["request"]["body_json"]["password"] == "<REDACTED>"
+      assert interaction["request"]["body_json"]["api_key"] == "<REDACTED>"
+
+      # Shut down bypass
+      Bypass.down(bypass)
+
+      # Second call with same sensitive data - should replay from cassette
+      response2 =
+        with_cassette(
+          "json_body_replay",
+          cassette_opts,
+          fn plug ->
+            Req.post!(
+              "http://localhost:#{bypass.port}/authenticate",
+              json: %{
+                username: "alice",
+                password: "secret123",
+                api_key: "key-xyz-789"
+              },
+              plug: plug
+            )
+          end
+        )
+
+      # Should get same response from cassette
+      assert response2.status == 200
+      assert response2.body["authenticated"] == true
+      assert response2.body["user"] == "alice"
+
+      # Third call with strict replay mode
+      replay_opts = Keyword.put(cassette_opts, :mode, :replay)
+
+      response3 =
+        with_cassette(
+          "json_body_replay",
+          replay_opts,
+          fn plug ->
+            Req.post!(
+              "http://localhost:#{bypass.port}/authenticate",
+              json: %{
+                username: "alice",
+                password: "secret123",
+                api_key: "key-xyz-789"
+              },
+              plug: plug
+            )
+          end
+        )
+
+      # Should get same response even in strict replay mode
+      assert response3.status == 200
+      assert response3.body["authenticated"] == true
+      assert response3.body["user"] == "alice"
+    end
+
+    test "replay works with callback filter modifying request body" do
+      bypass = Bypass.open()
+
+      # Record phase
+      Bypass.expect(bypass, "POST", "/users", fn conn ->
+        {:ok, body, conn} = Conn.read_body(conn)
+        user = Jason.decode!(body)
+
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(
+          200,
+          Jason.encode!(%{
+            id: 1,
+            email: user["email"],
+            phone: user["phone"]
+          })
+        )
+      end)
+
+      # Callback that redacts email and phone in request body
+      redact_pii = fn interaction ->
+        interaction
+        |> update_in(["request", "body_json", "email"], fn _ -> "redacted@example.com" end)
+        |> update_in(["request", "body_json", "phone"], fn _ -> "555-0000" end)
+        |> update_in(["response", "body_json", "email"], fn _ -> "redacted@example.com" end)
+        |> update_in(["response", "body_json", "phone"], fn _ -> "555-0000" end)
+      end
+
+      cassette_opts = [
+        cassette_dir: @cassette_dir,
+        mode: :record_missing,
+        before_record: redact_pii,
+        # Only match on method and URI, not body
+        # This allows the callback to safely modify request body without breaking replay
+        match_requests_on: [:method, :uri]
+      ]
+
+      # First call with real PII
+      response1 =
+        with_cassette(
+          "callback_replay",
+          cassette_opts,
+          fn plug ->
+            Req.post!(
+              "http://localhost:#{bypass.port}/users",
+              json: %{
+                email: "alice@example.com",
+                phone: "555-1234",
+                name: "Alice"
+              },
+              plug: plug
+            )
+          end
+        )
+
+      assert response1.status == 200
+      assert response1.body["id"] == 1
+
+      # Verify cassette was created with redacted PII
+      cassette_path = Path.join(@cassette_dir, "callback_replay.json")
+      {:ok, data} = File.read(cassette_path)
+      refute String.contains?(data, "alice@example.com")
+      refute String.contains?(data, "555-1234")
+      assert String.contains?(data, "redacted@example.com")
+      assert String.contains?(data, "555-0000")
+
+      # Shut down bypass
+      Bypass.down(bypass)
+
+      # Second call with same PII - should replay from cassette
+      response2 =
+        with_cassette(
+          "callback_replay",
+          cassette_opts,
+          fn plug ->
+            Req.post!(
+              "http://localhost:#{bypass.port}/users",
+              json: %{
+                email: "alice@example.com",
+                phone: "555-1234",
+                name: "Alice"
+              },
+              plug: plug
+            )
+          end
+        )
+
+      # Should get same response from cassette
+      assert response2.status == 200
+      assert response2.body["id"] == 1
+
+      # Third call with strict replay mode
+      replay_opts = Keyword.put(cassette_opts, :mode, :replay)
+
+      response3 =
+        with_cassette(
+          "callback_replay",
+          replay_opts,
+          fn plug ->
+            Req.post!(
+              "http://localhost:#{bypass.port}/users",
+              json: %{
+                email: "alice@example.com",
+                phone: "555-1234",
+                name: "Alice"
+              },
+              plug: plug
+            )
+          end
+        )
+
+      # Should get same response even in strict replay mode
+      assert response3.status == 200
+      assert response3.body["id"] == 1
+    end
+
+    test "replay works with regex filters on URI path" do
+      bypass = Bypass.open()
+
+      # Record phase - dynamic user ID in path
+      Bypass.expect(bypass, "GET", "/api/users/user_12345/profile", fn conn ->
+        conn
+        |> Conn.put_resp_content_type("application/json")
+        |> Conn.resp(200, Jason.encode!(%{user_id: "user_12345", name: "Alice"}))
+      end)
+
+      cassette_opts = [
+        cassette_dir: @cassette_dir,
+        mode: :record_missing,
+        filter_sensitive_data: [
+          # Filter user IDs in URI path
+          {~r/user_\d+/, "user_<ID>"}
+        ]
+      ]
+
+      # First call with real user ID in path
+      response1 =
+        with_cassette(
+          "uri_path_replay",
+          cassette_opts,
+          fn plug ->
+            Req.get!(
+              "http://localhost:#{bypass.port}/api/users/user_12345/profile",
+              plug: plug
+            )
+          end
+        )
+
+      assert response1.status == 200
+      assert response1.body["name"] == "Alice"
+
+      # Verify cassette was created with filtered URI
+      cassette_path = Path.join(@cassette_dir, "uri_path_replay.json")
+      {:ok, data} = File.read(cassette_path)
+      refute String.contains?(data, "user_12345")
+      assert String.contains?(data, "user_<ID>")
+
+      # Shut down bypass
+      Bypass.down(bypass)
+
+      # Second call with same user ID - should replay from cassette
+      response2 =
+        with_cassette(
+          "uri_path_replay",
+          cassette_opts,
+          fn plug ->
+            Req.get!(
+              "http://localhost:#{bypass.port}/api/users/user_12345/profile",
+              plug: plug
+            )
+          end
+        )
+
+      # Should get same response from cassette
+      assert response2.status == 200
+      assert response2.body["name"] == "Alice"
+
+      # Third call with strict replay mode
+      replay_opts = Keyword.put(cassette_opts, :mode, :replay)
+
+      response3 =
+        with_cassette(
+          "uri_path_replay",
+          replay_opts,
+          fn plug ->
+            Req.get!(
+              "http://localhost:#{bypass.port}/api/users/user_12345/profile",
+              plug: plug
+            )
+          end
+        )
+
+      # Should get same response even in strict replay mode
+      assert response3.status == 200
+      assert response3.body["name"] == "Alice"
+    end
+  end
 end
