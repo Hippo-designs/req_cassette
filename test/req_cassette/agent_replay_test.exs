@@ -245,7 +245,8 @@ defmodule ReqCassette.AgentReplayTest do
       cassette_opts_replay = %{
         cassette_dir: @cassette_dir,
         cassette_name: "agent_single_prompt",
-        mode: :replay
+        mode: :replay,
+        filter_request_headers: ["authorization", "x-api-key", "cookie"]
       }
 
       Logger.debug("=== FIRST RUN ===")
@@ -300,7 +301,8 @@ defmodule ReqCassette.AgentReplayTest do
       cassette_opts_replay = %{
         cassette_dir: @cassette_dir,
         cassette_name: "agent_multiple_prompts",
-        mode: :replay
+        mode: :replay,
+        filter_request_headers: ["authorization", "x-api-key", "cookie"]
       }
 
       Logger.debug("=== FIRST RUN - Multiple prompts ===")

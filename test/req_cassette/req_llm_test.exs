@@ -38,7 +38,8 @@ defmodule ReqCassette.ReqLLMTest do
       cassette_opts_replay = %{
         cassette_dir: @cassette_dir,
         cassette_name: "llm_poem_generation",
-        mode: :replay
+        mode: :replay,
+        filter_request_headers: ["authorization", "x-api-key", "cookie"]
       }
 
       # First request - records to cassette
@@ -146,7 +147,8 @@ defmodule ReqCassette.ReqLLMTest do
       cassette_opts_replay = %{
         cassette_dir: @cassette_dir,
         cassette_name: "mocked_llm_response",
-        mode: :replay
+        mode: :replay,
+        filter_request_headers: ["authorization", "x-api-key", "cookie"]
       }
 
       messages = "Say hello"
